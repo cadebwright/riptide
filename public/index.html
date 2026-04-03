@@ -14,6 +14,7 @@
   <meta name="twitter:image" content="/og-image.svg">
   <meta name="description" content="Download SoundCloud tracks and playlists in MP3, WAV, AAC, FLAC at 320kbps. Playlist zip export included.">
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <script src="/wavesurfer.min.js"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap" rel="stylesheet">
   <style>
@@ -673,20 +674,10 @@
 
     .preview-btn:hover { opacity: 0.7; }
 
-    .preview-visualizer {
-      display: flex;
-      align-items: flex-end;
-      gap: 1.5px;
-      height: 40px;
+    .preview-waveform {
       margin-top: 8px;
-      padding: 0 2px;
-    }
-
-    .viz-bar {
-      flex: 1;
-      border-radius: 1.5px 1.5px 0 0;
-      min-height: 2px;
-      will-change: height;
+      border-radius: 6px;
+      overflow: hidden;
     }
 
     .preview-time {
@@ -848,7 +839,7 @@
             <span class="preview-track-name" id="previewTrackName">—</span>
             <button class="preview-btn" id="previewSkipBtn" title="Skip">&#9197;</button>
           </div>
-          <div class="preview-visualizer" id="previewVisualizer"></div>
+          <div class="preview-waveform" id="previewWaveform"></div>
           <div class="preview-time">
             <span id="previewTimeElapsed">0:00</span>
             <span id="previewTimeTotal">0:15</span>
@@ -1281,47 +1272,15 @@
       return div.innerHTML;
     }
 
-    // --- Preview player ---
-    let previewAudio = null;
-    let previewGainNode = null;
-    let previewAnalyser = null;
-    let previewAudioCtx = null;
-    let previewSource = null;
-    let previewAnimFrame = null;
+    // --- Preview player (wavesurfer.js) ---
+    let wavesurferInstance = null;
     let previewPlaying = false;
     let previewCurrentIndex = -1;
-    let previewNextIndex = 0; // always advances in order: 0, 1, 2, 3...
+    let previewNextIndex = 0;
     let previewJobId = null;
     let previewTrackNames = [];
     let previewReadySet = new Set();
     let previewClipTimer = null;
-    let previewFadeTimer = null;
-
-    const FADE_MS = 800;
-    let audioUnlocked = false;
-
-    // Safari/iOS blocks autoplay until a user gesture triggers play().
-    // We "unlock" audio on the first tap so subsequent auto-plays work.
-    function unlockAudio() {
-      if (audioUnlocked) return;
-      audioUnlocked = true;
-
-      // Create and play a silent audio element to unlock the media session
-      const silent = new Audio();
-      silent.src = 'data:audio/mp3;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU4Ljc2LjEwMAAAAAAAAAAAAAAA/+MYxAAAAAANIAAAAAExBTUUzLjEwMFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV/+MYxDsAAADSAAAAAFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV';
-      silent.volume = 0.01;
-      silent.play().then(() => { silent.pause(); silent.remove(); }).catch(() => {});
-
-      // Also unlock AudioContext
-      ensureAudioCtx();
-      if (previewAudioCtx && previewAudioCtx.state === 'suspended') {
-        previewAudioCtx.resume();
-      }
-    }
-
-    // Unlock on any user interaction that could lead to preview playback
-    document.getElementById('downloadBtn').addEventListener('click', unlockAudio, { once: false });
-    document.getElementById('previewEnabled').addEventListener('change', unlockAudio, { once: false });
 
     const previewEnabledCheck = document.getElementById('previewEnabled');
     previewEnabledCheck.checked = localStorage.getItem('previewEnabled') !== 'false';
@@ -1332,117 +1291,38 @@
     });
 
     document.getElementById('previewSkipBtn').addEventListener('click', () => {
-      unlockAudio();
-      fadeOutThenNext();
+      advanceToNext();
     });
-
-    const VIZ_BARS = 48;
-    let vizHeights = new Float32Array(VIZ_BARS);
-    let vizVelocities = new Float32Array(VIZ_BARS);
-    let vizAnalyserConnected = false;
-
-    function initVisualizer() {
-      const container = document.getElementById('previewVisualizer');
-      container.innerHTML = '';
-      vizHeights.fill(0);
-      vizVelocities.fill(0);
-      vizAnalyserConnected = false;
-      for (let i = 0; i < VIZ_BARS; i++) {
-        const bar = document.createElement('div');
-        bar.className = 'viz-bar';
-        bar.style.height = '2px';
-        bar.style.background = 'rgba(255, 103, 0, 0.3)';
-        container.appendChild(bar);
-      }
-    }
-
-    function ensureAudioCtx() {
-      if (!previewAudioCtx) {
-        previewAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      }
-      if (previewAudioCtx.state === 'suspended') {
-        previewAudioCtx.resume();
-      }
-    }
 
     function onPreviewReady(jobId, trackIndex, trackName) {
       previewJobId = jobId;
       if (!previewTrackNames[trackIndex]) previewTrackNames[trackIndex] = trackName;
       previewReadySet.add(trackIndex);
 
-      // If we're waiting for this exact track, start playing
       if (previewEnabledCheck.checked && !previewPlaying && trackIndex === previewNextIndex) {
         playPreview(trackIndex);
       }
     }
 
-    function fadeOutThenNext() {
-      if (!previewAudio || !previewGainNode) {
-        advanceToNext();
-        return;
-      }
-
-      // Fade out over FADE_MS
-      const now = previewAudioCtx.currentTime;
-      previewGainNode.gain.cancelScheduledValues(now);
-      previewGainNode.gain.setValueAtTime(previewGainNode.gain.value, now);
-      previewGainNode.gain.linearRampToValueAtTime(0, now + FADE_MS / 1000);
-
-      if (previewClipTimer) { clearTimeout(previewClipTimer); previewClipTimer = null; }
-      if (previewFadeTimer) { clearTimeout(previewFadeTimer); }
-      previewFadeTimer = setTimeout(() => {
-        advanceToNext();
-      }, FADE_MS);
-    }
-
     function advanceToNext() {
-      if (previewFadeTimer) { clearTimeout(previewFadeTimer); previewFadeTimer = null; }
       if (previewClipTimer) { clearTimeout(previewClipTimer); previewClipTimer = null; }
 
-      // Clean up current audio
-      if (previewAudio) {
-        previewAudio.pause();
-        previewAudio.src = '';
-        previewAudio = null;
+      if (wavesurferInstance) {
+        wavesurferInstance.stop();
       }
-      if (previewSource) {
-        try { previewSource.disconnect(); } catch(e) {}
-        previewSource = null;
-      }
-      previewGainNode = null;
-      previewAnalyser = null;
       previewPlaying = false;
 
       if (!previewEnabledCheck.checked) { stopPreview(); return; }
 
-      // Move to next track in order
       previewNextIndex = previewCurrentIndex + 1;
 
       if (previewReadySet.has(previewNextIndex)) {
         playPreview(previewNextIndex);
       }
-      // Otherwise wait — onPreviewReady will trigger when it arrives
     }
 
     function playPreview(idx) {
-      // Clean up old audio — remove listeners first to prevent cascading errors
-      if (previewAudio) {
-        const old = previewAudio;
-        previewAudio = null; // detach reference before cleanup
-        old.onended = null;
-        old.onerror = null;
-        old.ontimeupdate = null;
-        old.pause();
-        old.removeAttribute('src');
-        old.load(); // reset without triggering error
-      }
-      if (previewSource) {
-        try { previewSource.disconnect(); } catch(e) {}
-        previewSource = null;
-      }
       if (previewClipTimer) { clearTimeout(previewClipTimer); previewClipTimer = null; }
-      if (previewFadeTimer) { clearTimeout(previewFadeTimer); previewFadeTimer = null; }
-      if (previewAnimFrame) { cancelAnimationFrame(previewAnimFrame); previewAnimFrame = null; }
 
       previewReadySet.delete(idx);
       previewCurrentIndex = idx;
@@ -1454,179 +1334,72 @@
       document.getElementById('previewTrackName').textContent =
         previewTrackNames[idx] || `Track ${idx + 1}`;
 
-      // Random clip duration 10-20s
       const clipDuration = 10 + Math.random() * 10;
-      document.getElementById('previewTimeTotal').textContent =
-        `0:${String(Math.round(clipDuration)).padStart(2, '0')}`;
 
-      initVisualizer();
-      ensureAudioCtx();
+      // Destroy old instance
+      if (wavesurferInstance) {
+        wavesurferInstance.destroy();
+        wavesurferInstance = null;
+      }
 
-      previewAudio = new Audio();
-      previewAudio.crossOrigin = 'anonymous';
-      const thisAudio = previewAudio;
+      wavesurferInstance = WaveSurfer.create({
+        container: '#previewWaveform',
+        waveColor: 'rgba(255, 255, 255, 0.15)',
+        progressColor: '#FF6700',
+        cursorColor: '#fff',
+        cursorWidth: 2,
+        barWidth: 2,
+        barGap: 1.5,
+        barRadius: 2,
+        height: 44,
+        normalize: true,
+        interact: false,
+        url: `/api/preview/${previewJobId}/${idx}`,
+      });
 
-      // Attach ALL listeners BEFORE setting src to avoid race conditions
-      previewAudio.addEventListener('canplay', () => {
-        if (!previewPlaying || previewAudio !== thisAudio) return;
+      wavesurferInstance.on('ready', () => {
+        if (!previewPlaying) return;
+        const dur = wavesurferInstance.getDuration();
+        document.getElementById('previewTimeTotal').textContent = formatSec(dur);
+        wavesurferInstance.play();
 
-        try {
-          previewSource = previewAudioCtx.createMediaElementSource(previewAudio);
-          previewGainNode = previewAudioCtx.createGain();
-          previewAnalyser = previewAudioCtx.createAnalyser();
-          previewAnalyser.fftSize = 256;
-          previewAnalyser.smoothingTimeConstant = 0.7;
-
-          previewSource.connect(previewGainNode);
-          previewGainNode.connect(previewAnalyser);
-          previewAnalyser.connect(previewAudioCtx.destination);
-          vizAnalyserConnected = true;
-
-          // Fade in
-          const now = previewAudioCtx.currentTime;
-          previewGainNode.gain.setValueAtTime(0, now);
-          previewGainNode.gain.linearRampToValueAtTime(1, now + FADE_MS / 1000);
-        } catch (e) {
-          vizAnalyserConnected = false;
-        }
-
-        previewAudio.play().catch(() => {
-          // Safari autoplay blocked — show tap prompt on the player
-          const nameEl = document.getElementById('previewTrackName');
-          const origText = nameEl.textContent;
-          nameEl.textContent = '⏵ Tap here to start preview';
-          const tapHandler = () => {
-            nameEl.textContent = origText;
-            unlockAudio();
-            if (previewAudio) previewAudio.play().catch(() => {});
-            document.getElementById('previewPlayer').removeEventListener('click', tapHandler);
-          };
-          document.getElementById('previewPlayer').addEventListener('click', tapHandler);
-        });
-        animateVisualizer();
-
-        // Schedule fade out before clip ends, then advance
-        const fadeOutAt = (clipDuration - FADE_MS / 1000) * 1000;
+        // Auto-advance after clip duration
         previewClipTimer = setTimeout(() => {
-          fadeOutThenNext();
-        }, Math.max(0, fadeOutAt));
-      }, { once: true });
-
-      previewAudio.addEventListener('timeupdate', () => {
-        if (previewAudio !== thisAudio) return;
-        const el = document.getElementById('previewTimeElapsed');
-        if (el) {
-          const s = Math.floor(previewAudio.currentTime);
-          el.textContent = `0:${String(s).padStart(2, '0')}`;
-        }
+          advanceToNext();
+        }, clipDuration * 1000);
       });
 
-      previewAudio.addEventListener('ended', () => {
-        if (previewAudio === thisAudio) fadeOutThenNext();
+      wavesurferInstance.on('timeupdate', (time) => {
+        document.getElementById('previewTimeElapsed').textContent = formatSec(time);
       });
 
-      previewAudio.addEventListener('error', () => {
-        if (previewAudio === thisAudio) advanceToNext();
+      wavesurferInstance.on('finish', () => {
+        advanceToNext();
       });
 
-      // Set src LAST — after all listeners are attached
-      previewAudio.src = `/api/preview/${previewJobId}/${idx}`;
+      wavesurferInstance.on('error', () => {
+        advanceToNext();
+      });
     }
 
-    function animateVisualizer() {
-      if (!previewPlaying) return;
-
-      const bars = document.querySelectorAll('.viz-bar');
-      if (bars.length === 0) { previewAnimFrame = requestAnimationFrame(animateVisualizer); return; }
-
-      let rawData = null;
-
-      if (previewAnalyser && vizAnalyserConnected) {
-        const freqData = new Uint8Array(previewAnalyser.frequencyBinCount);
-        previewAnalyser.getByteFrequencyData(freqData);
-        rawData = new Float32Array(VIZ_BARS);
-        const binRatio = freqData.length / VIZ_BARS;
-        for (let i = 0; i < VIZ_BARS; i++) {
-          const start = Math.floor(i * binRatio);
-          const end = Math.floor((i + 1) * binRatio);
-          let sum = 0;
-          for (let j = start; j < end; j++) sum += freqData[j];
-          rawData[i] = (sum / (end - start)) / 255;
-        }
-      }
-
-      const hasData = rawData && rawData.some(v => v > 0.01);
-      if (!hasData && previewAudio && !previewAudio.paused) {
-        rawData = new Float32Array(VIZ_BARS);
-        const t = previewAudio.currentTime * 3;
-        for (let i = 0; i < VIZ_BARS; i++) {
-          const centerBias = 1 - Math.abs(i - VIZ_BARS / 2) / (VIZ_BARS / 2) * 0.4;
-          const wave1 = Math.sin(t * 2.1 + i * 0.3) * 0.3;
-          const wave2 = Math.sin(t * 3.7 + i * 0.5) * 0.2;
-          const wave3 = Math.sin(t * 1.3 + i * 0.15) * 0.25;
-          const pulse = (Math.sin(t * 0.8) * 0.5 + 0.5) * 0.15;
-          rawData[i] = Math.max(0, (0.3 + wave1 + wave2 + wave3 + pulse) * centerBias);
-        }
-      }
-
-      if (!rawData) rawData = new Float32Array(VIZ_BARS);
-
-      // Apply gain to visualizer so it fades with audio
-      const gainMult = previewGainNode ? previewGainNode.gain.value : 1;
-
-      for (let i = 0; i < VIZ_BARS; i++) {
-        const target = rawData[i] * 40 * gainMult;
-        if (target > vizHeights[i]) {
-          vizHeights[i] += (target - vizHeights[i]) * 0.35;
-          vizVelocities[i] = 0;
-        } else {
-          vizVelocities[i] += 0.15;
-          vizHeights[i] -= vizVelocities[i];
-        }
-        vizHeights[i] = Math.max(2, Math.min(40, vizHeights[i]));
-      }
-
-      bars.forEach((bar, i) => {
-        const h = vizHeights[i];
-        const intensity = h / 40;
-        bar.style.height = h + 'px';
-        const alpha = 0.2 + intensity * 0.8;
-        const glow = Math.round(103 + intensity * 50);
-        bar.style.background = `rgba(255, ${glow}, 0, ${alpha})`;
-      });
-
-      previewAnimFrame = requestAnimationFrame(animateVisualizer);
+    function formatSec(s) {
+      const m = Math.floor(s / 60);
+      const sec = Math.floor(s % 60);
+      return `${m}:${String(sec).padStart(2, '0')}`;
     }
 
     function stopPreview() {
       if (previewClipTimer) { clearTimeout(previewClipTimer); previewClipTimer = null; }
-      if (previewFadeTimer) { clearTimeout(previewFadeTimer); previewFadeTimer = null; }
-      if (previewAudio) {
-        previewAudio.pause();
-        previewAudio.src = '';
-        previewAudio = null;
+      if (wavesurferInstance) {
+        wavesurferInstance.destroy();
+        wavesurferInstance = null;
       }
-      if (previewSource) {
-        try { previewSource.disconnect(); } catch(e) {}
-        previewSource = null;
-      }
-      if (previewAnimFrame) {
-        cancelAnimationFrame(previewAnimFrame);
-        previewAnimFrame = null;
-      }
-      previewGainNode = null;
-      previewAnalyser = null;
       previewPlaying = false;
       previewReadySet = new Set();
       previewCurrentIndex = -1;
       previewNextIndex = 0;
       previewTrackNames = [];
       document.getElementById('previewPlayer').classList.remove('active');
-
-      document.querySelectorAll('.viz-bar').forEach(bar => {
-        bar.style.height = '2px';
-        bar.style.background = 'rgba(255, 103, 0, 0.3)';
-      });
     }
   </script>
 </body>
