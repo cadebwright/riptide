@@ -63,6 +63,7 @@ const jobs = new Map();
 
 const MAX_PLAYLIST_TRACKS = 50;
 const MAX_CONCURRENT_JOBS = 5;
+const TRACK_CONCURRENCY = 3;
 
 // Clean up old jobs every 10 minutes
 setInterval(() => {
@@ -95,19 +96,38 @@ function isValidSoundCloudUrl(urlStr) {
 
 // --- Routes ---
 
+// Extract a readable name from a SoundCloud URL slug
+function nameFromUrl(urlStr) {
+  try {
+    const parsed = new URL(urlStr);
+    const parts = parsed.pathname.split('/').filter(Boolean);
+    // Last segment is the track slug, second-to-last is the artist
+    const slug = parts[parts.length - 1] || '';
+    const artist = parts.length >= 2 ? parts[parts.length - 2] : '';
+    const titleize = (s) => s.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    return { title: titleize(slug), artist: titleize(artist) };
+  } catch {
+    return { title: 'Unknown', artist: 'Unknown' };
+  }
+}
+
 // Get track/playlist info
+// Single tracks: full metadata (fast for 1 track)
+// Playlists: fast --flat-playlist with names parsed from URL slugs
+//            Real metadata arrives via SSE as tracks download
 app.post('/api/info', apiLimiter, (req, res) => {
   const { url } = req.body;
   if (!url || !isValidSoundCloudUrl(url)) {
     return res.status(400).json({ error: 'Invalid SoundCloud URL' });
   }
 
+  // First: fast flat-playlist to detect type and get URLs
   execFile(YTDLP, [
+    '--flat-playlist',
     '--dump-json',
     '--no-warnings',
-    '--no-download',
     url
-  ], { maxBuffer: 50 * 1024 * 1024, timeout: 60000 }, (err, stdout) => {
+  ], { maxBuffer: 50 * 1024 * 1024, timeout: 30000 }, (err, stdout) => {
     if (err) {
       return res.status(500).json({ error: 'Failed to fetch track info. Make sure yt-dlp is installed.' });
     }
@@ -118,27 +138,52 @@ app.post('/api/info', apiLimiter, (req, res) => {
       const isPlaylist = entries[0].playlist_title || entries[0].playlist || entries.length > 1;
 
       if (!isPlaylist && entries.length === 1) {
-        const t = entries[0];
-        return res.json({
-          type: 'track',
-          title: t.fulltitle || t.title || t.track || 'Unknown',
-          artist: t.artist || t.uploader || t.creator || t.channel || 'Unknown',
-          album: t.album || '',
-          artwork: getBestThumbnail(t),
-          duration: t.duration || 0,
-          url: t.webpage_url || url
+        // Single track — full metadata fetch (fast for just 1)
+        const trackUrl = entries[0].url || entries[0].webpage_url || url;
+        execFile(YTDLP, [
+          '--dump-json',
+          '--no-warnings',
+          '--no-download',
+          trackUrl
+        ], { maxBuffer: 10 * 1024 * 1024, timeout: 30000 }, (err2, stdout2) => {
+          if (err2) {
+            const fallback = nameFromUrl(trackUrl);
+            return res.json({
+              type: 'track',
+              title: fallback.title,
+              artist: fallback.artist,
+              album: '', artwork: '', duration: 0,
+              url: trackUrl
+            });
+          }
+          const t = JSON.parse(stdout2.trim().split('\n')[0]);
+          return res.json({
+            type: 'track',
+            title: t.fulltitle || t.title || t.track || 'Unknown',
+            artist: t.artist || t.uploader || t.creator || t.channel || 'Unknown',
+            album: t.album || '',
+            artwork: getBestThumbnail(t),
+            duration: t.duration || 0,
+            url: t.webpage_url || trackUrl
+          });
         });
+        return;
       }
 
+      // Playlist — return immediately with URL-derived names
       const playlistTitle = entries[0].playlist_title || entries[0].playlist || 'Playlist';
-      const tracks = entries.slice(0, MAX_PLAYLIST_TRACKS).map(t => ({
-        title: t.fulltitle || t.title || t.track || 'Unknown',
-        artist: t.artist || t.uploader || t.creator || t.channel || 'Unknown',
-        album: t.album || '',
-        artwork: getBestThumbnail(t),
-        duration: t.duration || 0,
-        url: t.webpage_url || t.url || ''
-      }));
+      const tracks = entries.slice(0, MAX_PLAYLIST_TRACKS).map(t => {
+        const trackUrl = t.url || t.webpage_url || '';
+        const parsed = nameFromUrl(trackUrl);
+        return {
+          title: t.title || parsed.title,
+          artist: t.uploader || t.artist || parsed.artist,
+          album: '',
+          artwork: t.thumbnail || '',
+          duration: t.duration || 0,
+          url: trackUrl
+        };
+      });
 
       const response = { type: 'playlist', title: playlistTitle, tracks };
       if (entries.length > MAX_PLAYLIST_TRACKS) {
@@ -292,6 +337,7 @@ app.post('/api/start-playlist', downloadLimiter, (req, res) => {
     totalTracks: tracks.length,
     trackStatuses: tracks.map(() => 'pending'),
     previewReady: tracks.map(() => false),
+    trackMeta: tracks.map(() => null),
     batchDir,
     previewDir,
     zipPath: null,
@@ -307,18 +353,12 @@ app.post('/api/start-playlist', downloadLimiter, (req, res) => {
   processPlaylist(jobId, tracks, format);
 });
 
-async function processPlaylist(jobId, tracks, format) {
-  const job = jobs.get(jobId);
-  if (!job) return;
+function downloadTrack(job, track, i, format) {
+  return new Promise((resolve) => {
+    if (job.cancelled) { resolve(); return; }
 
-  for (let i = 0; i < tracks.length; i++) {
-    if (job.cancelled) break;
-
-    job.currentTrack = i;
     job.trackStatuses[i] = 'downloading';
-    job.progress = Math.round((i / tracks.length) * 90);
 
-    const track = tracks[i];
     const trackNum = String(i + 1).padStart(2, '0');
     const trackSafeName = (track.title || 'track').replace(/[<>:"/\\|?*]/g, '').substring(0, 80);
     const fileId = randomUUID();
@@ -330,6 +370,7 @@ async function processPlaylist(jobId, tracks, format) {
       '--audio-quality', '0',
       '--embed-thumbnail',
       '--add-metadata',
+      '--print-json',
       '--no-playlist',
       '--no-warnings',
       '-o', outputTemplate,
@@ -341,49 +382,95 @@ async function processPlaylist(jobId, tracks, format) {
 
     args.push(track.url);
 
-    try {
-      await new Promise((resolve, reject) => {
-        if (job.cancelled) return reject(new Error('Cancelled'));
+    const proc = spawn(YTDLP, args, { timeout: 120000 });
+    job.procs.push(proc);
 
-        const proc = spawn(YTDLP, args, { timeout: 120000 });
-        job.procs.push(proc);
+    // Capture stdout for metadata (--print-json writes JSON to stdout)
+    let jsonOut = '';
+    proc.stdout.on('data', (d) => { jsonOut += d.toString(); });
 
-        proc.on('close', (code) => {
-          if (job.cancelled) return reject(new Error('Cancelled'));
-          if (code !== 0) return reject(new Error(`Track failed`));
+    proc.on('close', (code) => {
+      if (job.cancelled) { resolve(); return; }
 
-          const files = fs.readdirSync(job.batchDir).filter(f => f.startsWith(fileId));
-          const audioExts = ['mp3', 'wav', 'aac', 'flac', 'm4a', 'opus', 'ogg'];
-          const audioFile = files.find(f => audioExts.includes(path.extname(f).slice(1)));
+      if (code !== 0) {
+        job.trackStatuses[i] = 'failed';
+        resolve();
+        return;
+      }
 
-          if (audioFile) {
-            const ext = path.extname(audioFile).slice(1);
-            const newName = `${trackNum} - ${trackSafeName}.${ext}`;
-            const fullTrackPath = path.join(job.batchDir, newName);
-            fs.renameSync(path.join(job.batchDir, audioFile), fullTrackPath);
-            job.trackStatuses[i] = 'done';
+      // Try to parse enriched metadata from yt-dlp output
+      try {
+        const meta = JSON.parse(jsonOut.trim().split('\n').pop());
+        job.trackMeta[i] = {
+          title: meta.fulltitle || meta.title || track.title,
+          artist: meta.artist || meta.uploader || meta.creator || track.artist,
+          artwork: getBestThumbnail(meta),
+          duration: meta.duration || track.duration || 0,
+        };
+      } catch (e) {}
 
-            // Generate preview clip (15s from ~35% into the track)
-            generatePreview(fullTrackPath, job.previewDir, i, track.duration || 0)
-              .then(() => { job.previewReady[i] = true; })
-              .catch(() => {}); // non-fatal
-          } else {
-            job.trackStatuses[i] = 'failed';
-          }
+      const files = fs.readdirSync(job.batchDir).filter(f => f.startsWith(fileId));
+      const audioExts = ['mp3', 'wav', 'aac', 'flac', 'm4a', 'opus', 'ogg'];
+      const audioFile = files.find(f => audioExts.includes(path.extname(f).slice(1)));
 
-          const leftover = fs.readdirSync(job.batchDir).filter(f => f.startsWith(fileId));
-          leftover.forEach(f => { try { fs.unlinkSync(path.join(job.batchDir, f)); } catch (e) {} });
+      if (audioFile) {
+        const ext = path.extname(audioFile).slice(1);
+        const meta = job.trackMeta[i];
+        const displayName = meta ? (meta.title || trackSafeName) : trackSafeName;
+        const safeFinal = displayName.replace(/[<>:"/\\|?*]/g, '').substring(0, 80);
+        const newName = `${trackNum} - ${safeFinal}.${ext}`;
+        const fullTrackPath = path.join(job.batchDir, newName);
+        fs.renameSync(path.join(job.batchDir, audioFile), fullTrackPath);
+        job.trackStatuses[i] = 'done';
 
-          resolve();
-        });
+        const dur = (meta && meta.duration) || track.duration || 0;
+        generatePreview(fullTrackPath, job.previewDir, i, dur)
+          .then(() => { job.previewReady[i] = true; })
+          .catch(() => {});
+      } else {
+        job.trackStatuses[i] = 'failed';
+      }
 
-        proc.on('error', reject);
-      });
-    } catch (err) {
-      if (job.cancelled) break;
+      const leftover = fs.readdirSync(job.batchDir).filter(f => f.startsWith(fileId));
+      leftover.forEach(f => { try { fs.unlinkSync(path.join(job.batchDir, f)); } catch (e) {} });
+
+      resolve();
+    });
+
+    proc.on('error', () => {
       job.trackStatuses[i] = 'failed';
+      resolve();
+    });
+  });
+}
+
+async function processPlaylist(jobId, tracks, format) {
+  const job = jobs.get(jobId);
+  if (!job) return;
+
+  // Concurrent download pool
+  let nextIndex = 0;
+
+  function updateProgress() {
+    const done = job.trackStatuses.filter(s => s === 'done' || s === 'failed').length;
+    job.progress = Math.round((done / tracks.length) * 90);
+    job.currentTrack = Math.min(nextIndex, tracks.length - 1);
+  }
+
+  async function worker() {
+    while (nextIndex < tracks.length && !job.cancelled) {
+      const i = nextIndex++;
+      await downloadTrack(job, tracks[i], i, format);
+      updateProgress();
     }
   }
+
+  // Launch workers
+  const workers = [];
+  for (let w = 0; w < Math.min(TRACK_CONCURRENCY, tracks.length); w++) {
+    workers.push(worker());
+  }
+  await Promise.all(workers);
 
   if (job.cancelled) {
     job.status = 'cancelled';
@@ -457,6 +544,7 @@ app.get('/api/progress/:jobId', (req, res) => {
       totalTracks: job.totalTracks,
       trackStatuses: job.trackStatuses,
       previewReady: job.previewReady,
+      trackMeta: job.trackMeta,
       error: job.error,
     })}\n\n`);
 
@@ -518,8 +606,8 @@ function generatePreview(trackPath, previewDir, trackIndex, duration) {
       '-y',
       '-ss', String(startSec),
       '-i', trackPath,
-      '-t', '15',
-      '-af', 'afade=t=in:st=0:d=1,afade=t=out:st=13:d=2',
+      '-t', '20',
+      '-af', 'afade=t=in:st=0:d=1,afade=t=out:st=18:d=2',
       '-b:a', '128k',
       '-f', 'mp3',
       previewPath
@@ -555,6 +643,7 @@ app.get('/api/preview/:jobId/:trackIndex', (req, res) => {
 
   res.setHeader('Content-Type', 'audio/mpeg');
   res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Access-Control-Allow-Origin', '*');
   fs.createReadStream(previewPath).pipe(res);
 });
 
