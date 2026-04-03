@@ -1382,10 +1382,16 @@
     }
 
     function playPreview(idx) {
-      // Clean up anything lingering
+      // Clean up old audio — remove listeners first to prevent cascading errors
       if (previewAudio) {
-        previewAudio.pause();
-        previewAudio.src = '';
+        const old = previewAudio;
+        previewAudio = null; // detach reference before cleanup
+        old.onended = null;
+        old.onerror = null;
+        old.ontimeupdate = null;
+        old.pause();
+        old.removeAttribute('src');
+        old.load(); // reset without triggering error
       }
       if (previewSource) {
         try { previewSource.disconnect(); } catch(e) {}
@@ -1415,10 +1421,11 @@
 
       previewAudio = new Audio();
       previewAudio.crossOrigin = 'anonymous';
+      const thisAudio = previewAudio;
 
       // Attach ALL listeners BEFORE setting src to avoid race conditions
       previewAudio.addEventListener('canplay', () => {
-        if (!previewPlaying) return;
+        if (!previewPlaying || previewAudio !== thisAudio) return;
 
         try {
           previewSource = previewAudioCtx.createMediaElementSource(previewAudio);
@@ -1463,19 +1470,20 @@
       }, { once: true });
 
       previewAudio.addEventListener('timeupdate', () => {
+        if (previewAudio !== thisAudio) return;
         const el = document.getElementById('previewTimeElapsed');
-        if (el && previewAudio) {
+        if (el) {
           const s = Math.floor(previewAudio.currentTime);
           el.textContent = `0:${String(s).padStart(2, '0')}`;
         }
       });
 
       previewAudio.addEventListener('ended', () => {
-        fadeOutThenNext();
+        if (previewAudio === thisAudio) fadeOutThenNext();
       });
 
       previewAudio.addEventListener('error', () => {
-        advanceToNext();
+        if (previewAudio === thisAudio) advanceToNext();
       });
 
       // Set src LAST — after all listeners are attached

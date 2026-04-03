@@ -493,7 +493,15 @@ async function processPlaylist(jobId, tracks, format) {
       archive.on('error', reject);
 
       archive.pipe(output);
-      archive.directory(job.batchDir, false);
+      // Add only audio files, not the _previews subdirectory
+      const audioExts = ['.mp3', '.wav', '.aac', '.flac', '.m4a', '.opus', '.ogg'];
+      const files = fs.readdirSync(job.batchDir).filter(f => {
+        const ext = path.extname(f).toLowerCase();
+        return audioExts.includes(ext) && !f.startsWith('.');
+      });
+      for (const file of files) {
+        archive.file(path.join(job.batchDir, file), { name: file });
+      }
       archive.finalize();
     });
 
