@@ -14,6 +14,10 @@
   <meta name="twitter:image" content="/og-image.svg">
   <meta name="description" content="Download SoundCloud tracks and playlists in MP3, WAV, AAC, FLAC at 320kbps. Playlist zip export included.">
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#0f0f0f">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <script src="/wavesurfer.min.js"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -145,10 +149,49 @@
       border: 1px solid #2a2a2a;
       animation: fadeSlideIn 0.5s ease 0.2s both;
       transition: border-color 0.3s;
+      position: relative;
     }
 
     .download-box:focus-within {
       border-color: #333;
+    }
+
+    .download-box.dragover {
+      border-color: #FF6700;
+      background: #1f1a14;
+    }
+
+    /* Single track waveform */
+    .single-track-waveform {
+      margin-top: 16px;
+      border-radius: 6px;
+      overflow: hidden;
+      display: none;
+    }
+
+    .single-track-waveform.active { display: block; animation: fadeSlideIn 0.3s ease; }
+
+    /* Success confetti overlay */
+    @keyframes confettiFall {
+      0% { transform: translateY(-10px) rotate(0deg); opacity: 1; }
+      100% { transform: translateY(60px) rotate(720deg); opacity: 0; }
+    }
+
+    .confetti-container {
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      pointer-events: none;
+      overflow: hidden;
+      border-radius: 16px;
+      z-index: 10;
+    }
+
+    .confetti {
+      position: absolute;
+      width: 6px;
+      height: 6px;
+      border-radius: 1px;
+      animation: confettiFall 1.5s ease-out forwards;
     }
 
     .link-preview {
@@ -893,6 +936,8 @@
         <span class="track-format" id="trackFormat"></span>
       </div>
 
+      <div class="single-track-waveform" id="singleTrackWaveform"></div>
+
       <div class="playlist-section" id="playlistSection">
         <div class="playlist-header-row">
           <div class="playlist-header" id="playlistHeader"></div>
@@ -1072,6 +1117,7 @@
       document.getElementById('playlistSection').classList.remove('active');
       document.getElementById('trackInfo').classList.remove('active');
       document.getElementById('linkPreview').classList.remove('active');
+      hideSingleTrackWaveform();
       showMessage('Download cancelled', 'cancelled');
     }
 
@@ -1124,6 +1170,7 @@
 
     async function downloadSingleTrack(info, originalUrl, format) {
       showTrackInfo(info, format);
+      hideSingleTrackWaveform();
       setProgress(20, 'Downloading and converting...');
 
       const trackUrl = info.url || originalUrl;
@@ -1146,7 +1193,11 @@
 
       setProgress(100, 'Complete!');
       addToHistory();
+      showConfetti();
       showMessage('Download complete!', 'success');
+
+      // Show interactive waveform of the downloaded track
+      showSingleTrackWaveform(blob);
     }
 
     async function downloadPlaylist(info, format) {
@@ -1278,6 +1329,7 @@
       info.tracks.forEach((_, i) => updatePlaylistTrackStatus(i, 'done'));
       setProgress(100, 'Playlist complete!');
       info.tracks.forEach(() => addToHistory());
+      showConfetti();
       showMessage(`Playlist downloaded! ${info.tracks.length} tracks zipped.`, 'success');
       currentJobId = null;
     }
@@ -1539,6 +1591,111 @@
     document.getElementById('fixedPlayerSkip').addEventListener('click', () => {
       advanceToNext();
     });
+
+    // --- Drag and drop URL ---
+    const downloadBox = document.querySelector('.download-box');
+
+    downloadBox.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      downloadBox.classList.add('dragover');
+    });
+
+    downloadBox.addEventListener('dragleave', () => {
+      downloadBox.classList.remove('dragover');
+    });
+
+    downloadBox.addEventListener('drop', (e) => {
+      e.preventDefault();
+      downloadBox.classList.remove('dragover');
+      const text = e.dataTransfer.getData('text/plain') || e.dataTransfer.getData('text/uri-list');
+      if (text && text.includes('soundcloud.com')) {
+        document.getElementById('urlInput').value = text.trim();
+        if (!isDownloading) fetchPreview(text.trim());
+      }
+    });
+
+    // --- Keyboard shortcuts ---
+    document.addEventListener('keydown', (e) => {
+      // Don't trigger if typing in input
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+
+      if (e.code === 'Space' && previewPlaying) {
+        e.preventDefault();
+        advanceToNext();
+      }
+      if (e.code === 'Escape' && isDownloading) {
+        e.preventDefault();
+        cancelDownload();
+      }
+    });
+
+    // --- Download complete confetti ---
+    function showConfetti() {
+      const container = document.createElement('div');
+      container.className = 'confetti-container';
+      downloadBox.appendChild(container);
+
+      const colors = ['#FF6700', '#ff8c3a', '#34c759', '#fff', '#ffcc00'];
+      for (let i = 0; i < 40; i++) {
+        const piece = document.createElement('div');
+        piece.className = 'confetti';
+        piece.style.left = Math.random() * 100 + '%';
+        piece.style.top = Math.random() * 40 + '%';
+        piece.style.background = colors[Math.floor(Math.random() * colors.length)];
+        piece.style.animationDelay = (Math.random() * 0.5) + 's';
+        piece.style.animationDuration = (1 + Math.random() * 1) + 's';
+        piece.style.width = (4 + Math.random() * 4) + 'px';
+        piece.style.height = (4 + Math.random() * 4) + 'px';
+        piece.style.borderRadius = Math.random() > 0.5 ? '50%' : '1px';
+        container.appendChild(piece);
+      }
+      setTimeout(() => container.remove(), 2500);
+    }
+
+    // --- Single track waveform preview ---
+    let singleTrackWavesurfer = null;
+
+    function showSingleTrackWaveform(blob) {
+      const container = document.getElementById('singleTrackWaveform');
+      container.classList.add('active');
+
+      if (singleTrackWavesurfer) {
+        singleTrackWavesurfer.destroy();
+        singleTrackWavesurfer = null;
+      }
+
+      const url = URL.createObjectURL(blob);
+      singleTrackWavesurfer = WaveSurfer.create({
+        container: '#singleTrackWaveform',
+        waveColor: 'rgba(255, 255, 255, 0.15)',
+        progressColor: '#FF6700',
+        cursorColor: '#fff',
+        cursorWidth: 2,
+        barWidth: 2,
+        barGap: 1.5,
+        barRadius: 2,
+        height: 44,
+        normalize: true,
+        interact: true,
+        url: url,
+      });
+
+      singleTrackWavesurfer.on('ready', () => {
+        URL.revokeObjectURL(url);
+      });
+
+      singleTrackWavesurfer.on('interaction', () => {
+        singleTrackWavesurfer.playPause();
+      });
+    }
+
+    function hideSingleTrackWaveform() {
+      if (singleTrackWavesurfer) {
+        singleTrackWavesurfer.destroy();
+        singleTrackWavesurfer = null;
+      }
+      document.getElementById('singleTrackWaveform').classList.remove('active');
+    }
   </script>
 </body>
 </html>
