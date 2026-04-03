@@ -99,6 +99,49 @@
       border: 1px solid #2a2a2a;
     }
 
+    .link-preview {
+      display: none;
+      align-items: center;
+      gap: 16px;
+      margin-bottom: 20px;
+      padding: 16px;
+      background: linear-gradient(135deg, #1a1a1a 0%, #111 100%);
+      border-radius: 12px;
+      border: 1px solid #2a2a2a;
+    }
+
+    .link-preview.active { display: flex; }
+
+    .link-preview-art {
+      width: 72px;
+      height: 72px;
+      border-radius: 10px;
+      object-fit: cover;
+      background: #2a2a2a;
+      flex-shrink: 0;
+    }
+
+    .link-preview-info { flex: 1; min-width: 0; }
+
+    .link-preview-title {
+      font-size: 16px;
+      font-weight: 700;
+      margin-bottom: 4px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .link-preview-meta {
+      font-size: 12px;
+      color: #89898B;
+    }
+
+    .link-preview-meta span {
+      color: #FF6700;
+      font-weight: 600;
+    }
+
     .input-row {
       display: flex;
       gap: 10px;
@@ -577,6 +620,10 @@
       .subtitle { font-size: 13px; margin-bottom: 24px; }
 
       .download-box { padding: 16px; }
+      .link-preview { gap: 12px; padding: 12px; }
+      .link-preview-art { width: 56px; height: 56px; }
+      .link-preview-title { font-size: 14px; }
+      .link-preview-meta { font-size: 11px; }
       .input-row { flex-direction: column; }
       .input-row input { font-size: 14px; padding: 12px 14px; }
       .format-select { min-width: 100%; }
@@ -635,6 +682,14 @@
     <p class="subtitle">Paste a SoundCloud link, pick your format, and download at 320kbps</p>
 
     <div class="download-box">
+      <div class="link-preview" id="linkPreview">
+        <img class="link-preview-art" id="linkPreviewArt" src="" alt="">
+        <div class="link-preview-info">
+          <div class="link-preview-title" id="linkPreviewTitle"></div>
+          <div class="link-preview-meta" id="linkPreviewMeta"></div>
+        </div>
+      </div>
+
       <div class="input-row">
         <input type="text" id="urlInput" placeholder="Paste SoundCloud song or playlist link..." autofocus>
         <div class="format-select">
@@ -739,8 +794,7 @@
       previewAbort = new AbortController();
       lastPreviewedUrl = url;
 
-      document.getElementById('trackInfo').classList.remove('active');
-      document.getElementById('playlistSection').classList.remove('active');
+      document.getElementById('linkPreview').classList.remove('active');
       document.getElementById('message').className = 'message';
 
       try {
@@ -753,13 +807,27 @@
         const info = await res.json();
         if (!res.ok) return;
 
-        const format = document.getElementById('formatSelect').value;
+        // Show the banner
+        const preview = document.getElementById('linkPreview');
+        const artEl = document.getElementById('linkPreviewArt');
+        const titleEl = document.getElementById('linkPreviewTitle');
+        const metaEl = document.getElementById('linkPreviewMeta');
+
         if (info.type === 'track') {
-          showTrackInfo(info, format);
+          titleEl.textContent = info.title;
+          metaEl.innerHTML = escapeHtml(info.artist);
+          if (info.artwork) { artEl.src = info.artwork; artEl.style.display = 'block'; }
+          else { artEl.style.display = 'none'; }
         } else if (info.type === 'playlist') {
-          showPlaylistInfo(info, format);
+          titleEl.textContent = info.title;
+          metaEl.innerHTML = `<span>${info.tracks.length}</span> tracks`;
+          // Use first track's artwork as playlist cover
+          const cover = info.tracks.find(t => t.artwork)?.artwork || '';
+          if (cover) { artEl.src = cover; artEl.style.display = 'block'; }
+          else { artEl.style.display = 'none'; }
         }
-        // Store info for download
+
+        preview.classList.add('active');
         window._previewedInfo = info;
       } catch (e) {
         // Ignore abort errors
@@ -828,6 +896,7 @@
       hideProgress();
       document.getElementById('playlistSection').classList.remove('active');
       document.getElementById('trackInfo').classList.remove('active');
+      document.getElementById('linkPreview').classList.remove('active');
       showMessage('Download cancelled', 'cancelled');
     }
 
@@ -842,6 +911,7 @@
 
       setDownloadingState(true);
       document.getElementById('message').className = 'message';
+      document.getElementById('linkPreview').classList.remove('active');
 
       try {
         // Reuse previewed info if it matches the current URL
