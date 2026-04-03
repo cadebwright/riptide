@@ -360,7 +360,6 @@ function downloadTrack(job, track, i, format) {
 
     job.trackStatuses[i] = 'downloading';
 
-    const trackNum = String(i + 1).padStart(2, '0');
     const trackSafeName = (track.title || 'track').replace(/[<>:"/\\|?*]/g, '').substring(0, 80);
     const fileId = randomUUID();
     const outputTemplate = path.join(job.batchDir, `${fileId}.%(ext)s`);
@@ -419,7 +418,7 @@ function downloadTrack(job, track, i, format) {
         const meta = job.trackMeta[i];
         const displayName = meta ? (meta.title || trackSafeName) : trackSafeName;
         const safeFinal = displayName.replace(/[<>:"/\\|?*]/g, '').substring(0, 80);
-        const newName = `${trackNum} - ${safeFinal}.${ext}`;
+        const newName = `${safeFinal}.${ext}`;
         const fullTrackPath = path.join(job.batchDir, newName);
         fs.renameSync(path.join(job.batchDir, audioFile), fullTrackPath);
         job.trackStatuses[i] = 'done';
