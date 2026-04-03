@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0a0a0a"/>
+      <stop offset="100%" stop-color="#1a1a1a"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#FF6700"/>
+      <stop offset="100%" stop-color="#ff8c3a"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1200" height="630" fill="url(#bg)"/>
+
+  <!-- Decorative waves (background) -->
+  <g opacity="0.08" fill="none" stroke="#FF6700" stroke-width="3">
+    <path d="M0,200 Q75,140 150,200 T300,200 T450,200 T600,200 T750,200 T900,200 T1050,200 T1200,200"/>
+    <path d="M0,240 Q75,180 150,240 T300,240 T450,240 T600,240 T750,240 T900,240 T1050,240 T1200,240"/>
+    <path d="M0,440 Q75,380 150,440 T300,440 T450,440 T600,440 T750,440 T900,440 T1050,440 T1200,440"/>
+    <path d="M0,480 Q75,420 150,480 T300,480 T450,480 T600,480 T750,480 T900,480 T1050,480 T1200,480"/>
+  </g>
+
+  <!-- Logo icon -->
+  <g transform="translate(440, 180)">
+    <rect width="80" height="80" rx="18" fill="#1a1a1a" stroke="#2a2a2a" stroke-width="2"/>
+    <g transform="translate(10, 16)" fill="none" stroke="url(#accent)" stroke-width="5" stroke-linecap="round">
+      <path d="M0,22 Q7.5,6 15,22 T30,22 T45,22 T60,22"/>
+      <path d="M0,38 Q7.5,22 15,38 T30,38 T45,38 T60,38" opacity="0.5"/>
+    </g>
+    <path d="M48,40 L48,58 M43,55 L48,60 L53,55" stroke="url(#accent)" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  </g>
+
+  <!-- Title -->
+  <text x="540" y="240" font-family="system-ui, -apple-system, sans-serif" font-size="72" font-weight="700" fill="#FF6700" text-anchor="start">Rip</text>
+  <text x="660" y="240" font-family="system-ui, -apple-system, sans-serif" font-size="72" font-weight="700" fill="#ffffff" text-anchor="start">Tide</text>
+
+  <!-- Tagline -->
+  <text x="600" y="340" font-family="system-ui, -apple-system, sans-serif" font-size="32" font-weight="400" fill="#89898B" text-anchor="middle">Download SoundCloud tracks in MP3, WAV, AAC, FLAC</text>
+
+  <!-- Feature pills -->
+  <g transform="translate(600, 400)" text-anchor="middle">
+    <rect x="-280" y="-20" width="140" height="40" rx="20" fill="rgba(255,103,0,0.1)" stroke="rgba(255,103,0,0.3)" stroke-width="1"/>
+    <text x="-210" y="8" font-family="system-ui, sans-serif" font-size="16" font-weight="600" fill="#FF6700">320kbps</text>
+
+    <rect x="-100" y="-20" width="200" height="40" rx="20" fill="rgba(255,103,0,0.1)" stroke="rgba(255,103,0,0.3)" stroke-width="1"/>
+    <text x="0" y="8" font-family="system-ui, sans-serif" font-size="16" font-weight="600" fill="#FF6700">Playlist Support</text>
+
+    <rect x="140" y="-20" width="140" height="40" rx="20" fill="rgba(255,103,0,0.1)" stroke="rgba(255,103,0,0.3)" stroke-width="1"/>
+    <text x="210" y="8" font-family="system-ui, sans-serif" font-size="16" font-weight="600" fill="#FF6700">Zip Export</text>
+  </g>
+
+  <!-- Bottom accent line -->
+  <rect x="0" y="620" width="1200" height="10" fill="url(#accent)"/>
+</svg>
