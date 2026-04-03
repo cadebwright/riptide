@@ -1,0 +1,968 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RipTide</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: 'Montserrat', sans-serif;
+      background: #0f0f0f;
+      color: #fff;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    header {
+      width: 100%;
+      padding: 20px 40px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid #1a1a1a;
+    }
+
+    .logo {
+      font-size: 22px;
+      font-weight: 700;
+      color: #FF6700;
+      letter-spacing: -0.5px;
+    }
+
+    .logo span { color: #fff; }
+
+    .header-right {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .download-count {
+      font-size: 13px;
+      color: #89898B;
+    }
+
+    .download-count strong {
+      color: #FF6700;
+    }
+
+    main {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      width: 100%;
+      max-width: 720px;
+      padding: 60px 20px;
+    }
+
+    h1 {
+      font-size: 32px;
+      font-weight: 700;
+      margin-bottom: 8px;
+      text-align: center;
+    }
+
+    h1 span { color: #FF6700; }
+
+    .subtitle {
+      color: #89898B;
+      font-size: 15px;
+      margin-bottom: 40px;
+      text-align: center;
+    }
+
+    .download-box {
+      width: 100%;
+      background: #1a1a1a;
+      border-radius: 16px;
+      padding: 32px;
+      border: 1px solid #2a2a2a;
+    }
+
+    .input-row {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+
+    .input-row input {
+      flex: 1;
+      padding: 14px 18px;
+      border-radius: 10px;
+      border: 2px solid #2a2a2a;
+      background: #111;
+      color: #fff;
+      font-family: 'Montserrat', sans-serif;
+      font-size: 14px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+
+    .input-row input:focus { border-color: #FF6700; }
+    .input-row input::placeholder { color: #555; }
+
+    .format-select {
+      position: relative;
+      min-width: 110px;
+    }
+
+    .format-select select {
+      width: 100%;
+      padding: 14px 16px;
+      border-radius: 10px;
+      border: 2px solid #2a2a2a;
+      background: #111;
+      color: #fff;
+      font-family: 'Montserrat', sans-serif;
+      font-size: 14px;
+      outline: none;
+      cursor: pointer;
+      appearance: none;
+      -webkit-appearance: none;
+      transition: border-color 0.2s;
+    }
+
+    .format-select select:focus { border-color: #FF6700; }
+
+    .format-select::after {
+      content: '\25BC';
+      position: absolute;
+      right: 14px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: #FF6700;
+      font-size: 10px;
+      pointer-events: none;
+    }
+
+    .btn-row {
+      display: flex;
+      gap: 10px;
+    }
+
+    .btn-download {
+      flex: 1;
+      padding: 16px;
+      border: none;
+      border-radius: 10px;
+      background: #FF6700;
+      color: #fff;
+      font-family: 'Montserrat', sans-serif;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.2s, transform 0.1s;
+    }
+
+    .btn-download:hover { background: #e65c00; }
+    .btn-download:active { transform: scale(0.98); }
+    .btn-download:disabled {
+      background: #333;
+      color: #666;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    .btn-cancel {
+      display: none;
+      padding: 16px 24px;
+      border: 2px solid #ff3b30;
+      border-radius: 10px;
+      background: transparent;
+      color: #ff3b30;
+      font-family: 'Montserrat', sans-serif;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .btn-cancel:hover { background: rgba(255, 59, 48, 0.1); }
+    .btn-cancel.active { display: block; }
+
+    .progress-section {
+      display: none;
+      margin-top: 24px;
+    }
+
+    .progress-section.active { display: block; }
+
+    .progress-info {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 8px;
+      font-size: 13px;
+    }
+
+    .progress-status { color: #FF6700; font-weight: 600; }
+    .progress-percent { color: #89898B; }
+
+    .progress-bar-bg {
+      width: 100%;
+      height: 8px;
+      background: #2a2a2a;
+      border-radius: 4px;
+      overflow: hidden;
+    }
+
+    .progress-bar-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #FF6700, #ff8c3a);
+      border-radius: 4px;
+      width: 0%;
+      transition: width 0.3s ease;
+    }
+
+    .track-info {
+      display: none;
+      margin-top: 20px;
+      padding: 16px;
+      background: #111;
+      border-radius: 10px;
+      border: 1px solid #2a2a2a;
+    }
+
+    .track-info.active {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .track-artwork {
+      width: 64px;
+      height: 64px;
+      border-radius: 8px;
+      object-fit: cover;
+      background: #2a2a2a;
+      flex-shrink: 0;
+    }
+
+    .track-details { flex: 1; min-width: 0; }
+
+    .track-title {
+      font-size: 14px;
+      font-weight: 600;
+      margin-bottom: 4px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .track-artist {
+      font-size: 12px;
+      color: #89898B;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .track-album {
+      font-size: 11px;
+      color: #666;
+      margin-top: 2px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .track-format {
+      font-size: 11px;
+      color: #FF6700;
+      background: rgba(255, 103, 0, 0.1);
+      padding: 4px 10px;
+      border-radius: 6px;
+      font-weight: 600;
+      flex-shrink: 0;
+    }
+
+    .history-section {
+      width: 100%;
+      margin-top: 40px;
+    }
+
+    .history-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 16px;
+    }
+
+    .history-header h2 {
+      font-size: 18px;
+      font-weight: 600;
+    }
+
+    .clear-btn {
+      background: none;
+      border: 1px solid #2a2a2a;
+      color: #89898B;
+      padding: 6px 14px;
+      border-radius: 8px;
+      font-family: 'Montserrat', sans-serif;
+      font-size: 12px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .clear-btn:hover {
+      border-color: #FF6700;
+      color: #FF6700;
+    }
+
+    .history-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .history-item {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 12px 16px;
+      background: #1a1a1a;
+      border-radius: 10px;
+      border: 1px solid #2a2a2a;
+      transition: border-color 0.2s;
+    }
+
+    .history-item:hover { border-color: #333; }
+
+    .history-artwork {
+      width: 44px;
+      height: 44px;
+      border-radius: 6px;
+      object-fit: cover;
+      background: #2a2a2a;
+      flex-shrink: 0;
+    }
+
+    .history-details { flex: 1; min-width: 0; }
+
+    .history-title {
+      font-size: 13px;
+      font-weight: 600;
+      margin-bottom: 2px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .history-meta {
+      font-size: 11px;
+      color: #89898B;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .history-actions {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-shrink: 0;
+    }
+
+    .history-format {
+      font-size: 10px;
+      color: #FF6700;
+      background: rgba(255, 103, 0, 0.1);
+      padding: 3px 8px;
+      border-radius: 4px;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+
+    .empty-history {
+      text-align: center;
+      padding: 32px;
+      color: #555;
+      font-size: 14px;
+    }
+
+    .message {
+      margin-top: 16px;
+      padding: 12px 16px;
+      border-radius: 8px;
+      font-size: 13px;
+      display: none;
+    }
+
+    .message.error {
+      display: block;
+      background: rgba(255, 59, 48, 0.1);
+      border: 1px solid rgba(255, 59, 48, 0.3);
+      color: #ff3b30;
+    }
+
+    .message.success {
+      display: block;
+      background: rgba(52, 199, 89, 0.1);
+      border: 1px solid rgba(52, 199, 89, 0.3);
+      color: #34c759;
+    }
+
+    .message.cancelled {
+      display: block;
+      background: rgba(255, 204, 0, 0.1);
+      border: 1px solid rgba(255, 204, 0, 0.3);
+      color: #ffcc00;
+    }
+
+    .playlist-section {
+      display: none;
+      margin-top: 20px;
+    }
+
+    .playlist-section.active { display: block; }
+
+    .playlist-header-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+
+    .playlist-header {
+      font-size: 14px;
+      font-weight: 600;
+      color: #FF6700;
+    }
+
+    .playlist-count {
+      font-size: 12px;
+      color: #89898B;
+    }
+
+    .playlist-items {
+      max-height: 300px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .playlist-items::-webkit-scrollbar { width: 6px; }
+    .playlist-items::-webkit-scrollbar-track { background: #111; border-radius: 3px; }
+    .playlist-items::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
+
+    .playlist-track {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 12px;
+      background: #111;
+      border-radius: 8px;
+      font-size: 12px;
+    }
+
+    .playlist-track-artwork {
+      width: 32px;
+      height: 32px;
+      border-radius: 4px;
+      object-fit: cover;
+      background: #2a2a2a;
+      flex-shrink: 0;
+    }
+
+    .playlist-track-num {
+      color: #555;
+      min-width: 24px;
+      flex-shrink: 0;
+    }
+
+    .playlist-track-info {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .playlist-track-title {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .playlist-track-artist {
+      font-size: 10px;
+      color: #89898B;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .playlist-track-status {
+      font-size: 11px;
+      color: #89898B;
+      flex-shrink: 0;
+    }
+
+    .playlist-track-status.done { color: #34c759; }
+    .playlist-track-status.downloading { color: #FF6700; }
+    .playlist-track-status.failed { color: #ff3b30; }
+    .playlist-track-status.cancelled { color: #ffcc00; }
+
+    .spinner {
+      display: inline-block;
+      width: 16px;
+      height: 16px;
+      border: 2px solid #333;
+      border-top-color: #FF6700;
+      border-radius: 50%;
+      animation: spin 0.6s linear infinite;
+      vertical-align: middle;
+      margin-right: 8px;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    @media (max-width: 600px) {
+      header { padding: 16px 20px; }
+      main { padding: 40px 16px; }
+      h1 { font-size: 24px; }
+      .input-row { flex-direction: column; }
+      .format-select { min-width: 100%; }
+      .download-box { padding: 20px; }
+      .btn-row { flex-direction: column; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="logo">Rip<span>Tide</span></div>
+    <div class="header-right">
+      <div class="download-count">Downloads: <strong id="totalDownloads">0</strong></div>
+    </div>
+  </header>
+
+  <main>
+    <h1>Download <span>SoundCloud</span> Tracks</h1>
+    <p class="subtitle">Paste a SoundCloud link, pick your format, and download at 320kbps</p>
+
+    <div class="download-box">
+      <div class="input-row">
+        <input type="text" id="urlInput" placeholder="Paste SoundCloud song or playlist link..." autofocus>
+        <div class="format-select">
+          <select id="formatSelect">
+            <option value="mp3">MP3</option>
+            <option value="wav">WAV</option>
+            <option value="aac">AAC</option>
+            <option value="flac">FLAC</option>
+          </select>
+        </div>
+      </div>
+      <div class="btn-row">
+        <button class="btn-download" id="downloadBtn" onclick="startDownload()">Download</button>
+        <button class="btn-cancel" id="cancelBtn" onclick="cancelDownload()">Cancel</button>
+      </div>
+
+      <div class="message" id="message"></div>
+
+      <div class="progress-section" id="progressSection">
+        <div class="progress-info">
+          <span class="progress-status" id="progressStatus">Fetching track info...</span>
+          <span class="progress-percent" id="progressPercent">0%</span>
+        </div>
+        <div class="progress-bar-bg">
+          <div class="progress-bar-fill" id="progressFill"></div>
+        </div>
+      </div>
+
+      <div class="track-info" id="trackInfo">
+        <img class="track-artwork" id="trackArtwork" src="" alt="">
+        <div class="track-details">
+          <div class="track-title" id="trackTitle"></div>
+          <div class="track-artist" id="trackArtist"></div>
+          <div class="track-album" id="trackAlbum"></div>
+        </div>
+        <span class="track-format" id="trackFormat"></span>
+      </div>
+
+      <div class="playlist-section" id="playlistSection">
+        <div class="playlist-header-row">
+          <div class="playlist-header" id="playlistHeader"></div>
+          <div class="playlist-count" id="playlistCount"></div>
+        </div>
+        <div class="playlist-items" id="playlistItems"></div>
+      </div>
+    </div>
+
+    <div class="history-section" id="historySection">
+      <div class="history-header">
+        <h2>Recent Downloads</h2>
+        <button class="clear-btn" onclick="clearHistory()">Clear All</button>
+      </div>
+      <div class="history-list" id="historyList">
+        <div class="empty-history">No downloads yet</div>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    let downloadHistory = JSON.parse(localStorage.getItem('downloadHistory') || '[]');
+    let totalDownloads = parseInt(localStorage.getItem('totalDownloads') || '0');
+    let isDownloading = false;
+    let currentSessionId = null;
+    let currentJobId = null;
+    let currentAbortController = null;
+    let currentEventSource = null;
+
+    document.getElementById('totalDownloads').textContent = totalDownloads;
+    renderHistory();
+
+    document.getElementById('urlInput').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') startDownload();
+    });
+
+    function showMessage(text, type) {
+      const msg = document.getElementById('message');
+      msg.textContent = text;
+      msg.className = 'message ' + type;
+      if (type !== 'cancelled') {
+        setTimeout(() => { msg.className = 'message'; }, 5000);
+      }
+    }
+
+    function setProgress(percent, status) {
+      document.getElementById('progressSection').classList.add('active');
+      document.getElementById('progressFill').style.width = percent + '%';
+      document.getElementById('progressPercent').textContent = Math.round(percent) + '%';
+      if (status) document.getElementById('progressStatus').textContent = status;
+    }
+
+    function hideProgress() {
+      document.getElementById('progressSection').classList.remove('active');
+      document.getElementById('progressFill').style.width = '0%';
+    }
+
+    function setDownloadingState(active) {
+      isDownloading = active;
+      const btn = document.getElementById('downloadBtn');
+      const cancelBtn = document.getElementById('cancelBtn');
+
+      if (active) {
+        currentSessionId = 'session-' + Date.now();
+        currentAbortController = new AbortController();
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner"></span>Processing...';
+        cancelBtn.classList.add('active');
+      } else {
+        btn.disabled = false;
+        btn.textContent = 'Download';
+        cancelBtn.classList.remove('active');
+        currentAbortController = null;
+        if (currentEventSource) {
+          currentEventSource.close();
+          currentEventSource = null;
+        }
+      }
+    }
+
+    async function cancelDownload() {
+      if (!isDownloading) return;
+
+      fetch('/api/cancel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId: currentSessionId, jobId: currentJobId })
+      }).catch(() => {});
+
+      if (currentAbortController) currentAbortController.abort();
+      if (currentEventSource) { currentEventSource.close(); currentEventSource = null; }
+
+      currentJobId = null;
+      setDownloadingState(false);
+      hideProgress();
+      showMessage('Download cancelled', 'cancelled');
+    }
+
+    async function startDownload() {
+      if (isDownloading) return;
+
+      const url = document.getElementById('urlInput').value.trim();
+      const format = document.getElementById('formatSelect').value;
+
+      if (!url) { showMessage('Please paste a SoundCloud link', 'error'); return; }
+      if (!url.includes('soundcloud.com')) { showMessage('Please enter a valid SoundCloud URL', 'error'); return; }
+
+      setDownloadingState(true);
+      document.getElementById('trackInfo').classList.remove('active');
+      document.getElementById('playlistSection').classList.remove('active');
+      document.getElementById('message').className = 'message';
+
+      try {
+        setProgress(5, 'Fetching track info...');
+        const infoRes = await fetch('/api/info', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url }),
+          signal: currentAbortController.signal
+        });
+
+        const info = await infoRes.json();
+        if (!infoRes.ok) throw new Error(info.error || 'Failed to fetch track info');
+
+        if (info.type === 'track') {
+          await downloadSingleTrack(info, url, format);
+        } else if (info.type === 'playlist') {
+          await downloadPlaylist(info, format);
+        }
+
+      } catch (err) {
+        if (err.name === 'AbortError') return;
+        hideProgress();
+        showMessage(err.message, 'error');
+      } finally {
+        setDownloadingState(false);
+        setTimeout(hideProgress, 3000);
+      }
+    }
+
+    async function downloadSingleTrack(info, originalUrl, format) {
+      showTrackInfo(info, format);
+      setProgress(20, 'Downloading and converting...');
+
+      const trackUrl = info.url || originalUrl;
+      const dlRes = await fetch('/api/download', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: trackUrl, format, sessionId: currentSessionId }),
+        signal: currentAbortController.signal
+      });
+
+      if (!dlRes.ok) {
+        const err = await dlRes.json();
+        throw new Error(err.error || 'Download failed');
+      }
+
+      setProgress(80, 'Preparing file...');
+      const blob = await dlRes.blob();
+      const filename = sanitizeFilename(info.artist + ' - ' + info.title) + '.' + format;
+      triggerBrowserDownload(blob, filename);
+
+      setProgress(100, 'Complete!');
+      addToHistory(info, format);
+      showMessage('Download complete!', 'success');
+    }
+
+    async function downloadPlaylist(info, format) {
+      showPlaylistInfo(info, format);
+      setProgress(10, `Starting playlist download (${info.tracks.length} tracks)...`);
+
+      // Start the job (returns immediately)
+      const startRes = await fetch('/api/start-playlist', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tracks: info.tracks,
+          format,
+          playlistName: info.title
+        }),
+        signal: currentAbortController.signal
+      });
+
+      const { jobId } = await startRes.json();
+      if (!startRes.ok) throw new Error('Failed to start playlist download');
+
+      currentJobId = jobId;
+
+      // Listen for progress via SSE
+      await new Promise((resolve, reject) => {
+        const es = new EventSource(`/api/progress/${jobId}`);
+        currentEventSource = es;
+
+        es.onmessage = (event) => {
+          const data = JSON.parse(event.data);
+
+          // Update track statuses
+          if (data.trackStatuses) {
+            data.trackStatuses.forEach((status, i) => {
+              updatePlaylistTrackStatus(i, status);
+            });
+          }
+
+          if (data.status === 'downloading') {
+            const done = data.trackStatuses ? data.trackStatuses.filter(s => s === 'done').length : 0;
+            setProgress(
+              10 + (80 * done / data.totalTracks),
+              `Downloading track ${data.currentTrack + 1} of ${data.totalTracks}...`
+            );
+          } else if (data.status === 'zipping') {
+            setProgress(92, 'Creating zip file...');
+          } else if (data.status === 'complete') {
+            es.close();
+            currentEventSource = null;
+            resolve();
+          } else if (data.status === 'error') {
+            es.close();
+            currentEventSource = null;
+            reject(new Error(data.error || 'Playlist download failed'));
+          } else if (data.status === 'cancelled') {
+            es.close();
+            currentEventSource = null;
+            reject(new Error('Cancelled'));
+          }
+        };
+
+        es.onerror = () => {
+          es.close();
+          currentEventSource = null;
+          reject(new Error('Lost connection to server'));
+        };
+      });
+
+      // Download the zip
+      setProgress(95, 'Downloading zip...');
+      const dlRes = await fetch(`/api/download-zip/${jobId}`, {
+        signal: currentAbortController.signal
+      });
+
+      if (!dlRes.ok) throw new Error('Failed to download zip');
+
+      const blob = await dlRes.blob();
+      const filename = sanitizeFilename(info.title) + '.zip';
+      triggerBrowserDownload(blob, filename);
+
+      info.tracks.forEach((_, i) => updatePlaylistTrackStatus(i, 'done'));
+      setProgress(100, 'Playlist complete!');
+      info.tracks.forEach(t => addToHistory(t, format));
+      showMessage(`Playlist downloaded! ${info.tracks.length} tracks zipped.`, 'success');
+      currentJobId = null;
+    }
+
+    function showTrackInfo(info, format) {
+      const el = document.getElementById('trackInfo');
+      const artwork = document.getElementById('trackArtwork');
+      const albumEl = document.getElementById('trackAlbum');
+
+      if (info.artwork) { artwork.src = info.artwork; artwork.style.display = 'block'; }
+      else { artwork.style.display = 'none'; }
+
+      document.getElementById('trackTitle').textContent = info.title || 'Unknown Track';
+      document.getElementById('trackArtist').textContent = info.artist || 'Unknown Artist';
+
+      if (info.album) { albumEl.textContent = info.album; albumEl.style.display = 'block'; }
+      else { albumEl.style.display = 'none'; }
+
+      document.getElementById('trackFormat').textContent = format.toUpperCase();
+      el.classList.add('active');
+    }
+
+    function showPlaylistInfo(info, format) {
+      const section = document.getElementById('playlistSection');
+      document.getElementById('playlistHeader').textContent = info.title;
+      document.getElementById('playlistCount').textContent = `${info.tracks.length} tracks · ${format.toUpperCase()}`;
+
+      document.getElementById('playlistItems').innerHTML = info.tracks.map((t, i) => `
+        <div class="playlist-track" id="playlist-track-${i}">
+          <span class="playlist-track-num">${i + 1}</span>
+          ${t.artwork
+            ? `<img class="playlist-track-artwork" src="${escapeHtml(t.artwork)}" alt="">`
+            : `<div class="playlist-track-artwork"></div>`
+          }
+          <div class="playlist-track-info">
+            <div class="playlist-track-title">${escapeHtml(t.title)}</div>
+            <div class="playlist-track-artist">${escapeHtml(t.artist)}</div>
+          </div>
+          <span class="playlist-track-status" id="playlist-status-${i}">Pending</span>
+        </div>
+      `).join('');
+
+      section.classList.add('active');
+    }
+
+    function updatePlaylistTrackStatus(index, status) {
+      const el = document.getElementById(`playlist-status-${index}`);
+      if (!el) return;
+      el.className = 'playlist-track-status ' + status;
+      const labels = { done: '✓ Done', downloading: '↓ Downloading...', failed: '✗ Failed', cancelled: '— Cancelled', pending: 'Pending' };
+      el.textContent = labels[status] || status;
+    }
+
+    function triggerBrowserDownload(blob, filename) {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(a.href);
+    }
+
+    function sanitizeFilename(name) {
+      return (name || 'download').replace(/[<>:"/\\|?*]/g, '').replace(/\s+/g, ' ').trim().substring(0, 120);
+    }
+
+    function addToHistory(info, format) {
+      totalDownloads++;
+      localStorage.setItem('totalDownloads', totalDownloads);
+      document.getElementById('totalDownloads').textContent = totalDownloads;
+
+      downloadHistory.unshift({
+        title: info.title || 'Unknown',
+        artist: info.artist || 'Unknown',
+        artwork: info.artwork || '',
+        format: format,
+        date: new Date().toISOString()
+      });
+
+      if (downloadHistory.length > 50) downloadHistory.pop();
+      localStorage.setItem('downloadHistory', JSON.stringify(downloadHistory));
+      renderHistory();
+    }
+
+    function renderHistory() {
+      const list = document.getElementById('historyList');
+      if (downloadHistory.length === 0) {
+        list.innerHTML = '<div class="empty-history">No downloads yet</div>';
+        return;
+      }
+
+      list.innerHTML = downloadHistory.map((item) => `
+        <div class="history-item">
+          ${item.artwork
+            ? `<img class="history-artwork" src="${escapeHtml(item.artwork)}" alt="">`
+            : `<div class="history-artwork"></div>`
+          }
+          <div class="history-details">
+            <div class="history-title">${escapeHtml(item.title)}</div>
+            <div class="history-meta">${escapeHtml(item.artist)} &middot; ${timeAgo(item.date)}</div>
+          </div>
+          <div class="history-actions">
+            <span class="history-format">${item.format}</span>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function clearHistory() {
+      downloadHistory = [];
+      localStorage.setItem('downloadHistory', '[]');
+      renderHistory();
+    }
+
+    function timeAgo(dateStr) {
+      const diff = Date.now() - new Date(dateStr).getTime();
+      const mins = Math.floor(diff / 60000);
+      if (mins < 1) return 'Just now';
+      if (mins < 60) return mins + 'm ago';
+      const hrs = Math.floor(mins / 60);
+      if (hrs < 24) return hrs + 'h ago';
+      return Math.floor(hrs / 24) + 'd ago';
+    }
+
+    function escapeHtml(str) {
+      const div = document.createElement('div');
+      div.textContent = str || '';
+      return div.innerHTML;
+    }
+  </script>
+</body>
+</html>
