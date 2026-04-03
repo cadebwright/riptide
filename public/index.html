@@ -259,7 +259,7 @@
       background: #111;
       color: #fff;
       font-family: 'Montserrat', sans-serif;
-      font-size: 14px;
+      font-size: 16px;
       outline: none;
       transition: border-color 0.2s;
     }
@@ -829,7 +829,7 @@
       .link-preview-title { font-size: 14px; }
       .link-preview-meta { font-size: 11px; }
       .input-row { flex-direction: column; }
-      .input-row input { font-size: 14px; padding: 12px 14px; }
+      .input-row input { font-size: 16px; padding: 12px 14px; }
       .format-select { min-width: 100%; }
       .format-select select { padding: 12px 14px; }
 
@@ -1170,7 +1170,6 @@
 
     async function downloadSingleTrack(info, originalUrl, format) {
       showTrackInfo(info, format);
-      hideSingleTrackWaveform();
       setProgress(20, 'Downloading and converting...');
 
       const trackUrl = info.url || originalUrl;
@@ -1191,13 +1190,19 @@
       const filename = sanitizeFilename(info.artist + ' - ' + info.title) + '.' + format;
       triggerBrowserDownload(blob, filename);
 
-      setProgress(100, 'Complete!');
       addToHistory();
       showConfetti();
-      showMessage('Download complete!', 'success');
 
-      // Show interactive waveform of the downloaded track
-      showSingleTrackWaveform(blob);
+      // Clear the download UI after a moment
+      setTimeout(() => {
+        hideProgress();
+        document.getElementById('trackInfo').classList.remove('active');
+        hideSingleTrackWaveform();
+        document.getElementById('urlInput').value = '';
+        lastPreviewedUrl = '';
+        window._previewedInfo = null;
+        showMessage('Download complete!', 'success');
+      }, 1500);
     }
 
     async function downloadPlaylist(info, format) {
@@ -1326,11 +1331,18 @@
       triggerBrowserDownload(blob, filename);
 
       stopPreview();
-      info.tracks.forEach((_, i) => updatePlaylistTrackStatus(i, 'done'));
-      setProgress(100, 'Playlist complete!');
       info.tracks.forEach(() => addToHistory());
       showConfetti();
-      showMessage(`Playlist downloaded! ${info.tracks.length} tracks zipped.`, 'success');
+
+      // Clear the download UI after a moment
+      setTimeout(() => {
+        hideProgress();
+        document.getElementById('playlistSection').classList.remove('active');
+        document.getElementById('urlInput').value = '';
+        lastPreviewedUrl = '';
+        window._previewedInfo = null;
+        showMessage(`Playlist downloaded! ${info.tracks.length} tracks zipped.`, 'success');
+      }, 1500);
       currentJobId = null;
     }
 
