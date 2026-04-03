@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
-    "postinstall": "mkdir -p bin && if [ ! -f bin/yt-dlp ]; then curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o bin/yt-dlp && chmod +x bin/yt-dlp; fi"
+    "postinstall": "mkdir -p bin && if [ ! -f bin/yt-dlp ]; then curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux -o bin/yt-dlp && chmod +x bin/yt-dlp; fi"
   },
   "engines": {
     "node": ">=18.0.0"
