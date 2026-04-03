@@ -569,8 +569,8 @@
         </div>
       </div>
       <div class="btn-row">
-        <button class="btn-download" id="downloadBtn" onclick="startDownload()">Download</button>
-        <button class="btn-cancel" id="cancelBtn" onclick="cancelDownload()">Cancel</button>
+        <button class="btn-download" id="downloadBtn">Download</button>
+        <button class="btn-cancel" id="cancelBtn">Cancel</button>
       </div>
 
       <div class="message" id="message"></div>
@@ -607,7 +607,7 @@
     <div class="history-section" id="historySection">
       <div class="history-header">
         <h2>Recent Downloads</h2>
-        <button class="clear-btn" onclick="clearHistory()">Clear All</button>
+        <button class="clear-btn" id="clearBtn">Clear All</button>
       </div>
       <div class="history-list" id="historyList">
         <div class="empty-history">No downloads yet</div>
@@ -630,6 +630,9 @@
     document.getElementById('urlInput').addEventListener('keydown', (e) => {
       if (e.key === 'Enter') startDownload();
     });
+    document.getElementById('downloadBtn').addEventListener('click', startDownload);
+    document.getElementById('cancelBtn').addEventListener('click', cancelDownload);
+    document.getElementById('clearBtn').addEventListener('click', clearHistory);
 
     function showMessage(text, type) {
       const msg = document.getElementById('message');
