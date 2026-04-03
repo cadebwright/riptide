@@ -4,6 +4,8 @@ const path = require('path');
 const fs = require('fs');
 const { randomUUID } = require('crypto');
 const archiver = require('archiver');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -11,7 +13,44 @@ const DOWNLOADS_DIR = path.join(__dirname, 'downloads');
 
 if (!fs.existsSync(DOWNLOADS_DIR)) fs.mkdirSync(DOWNLOADS_DIR);
 
-app.use(express.json());
+// --- Security middleware ---
+
+// Security headers
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'"],
+      styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+      fontSrc: ["'self'", "https://fonts.gstatic.com"],
+      imgSrc: ["'self'", "https://i1.sndcdn.com", "https://*.sndcdn.com", "data:"],
+      connectSrc: ["'self'"],
+    }
+  }
+}));
+
+// Trust Heroku's proxy for rate limiting by IP
+app.set('trust proxy', 1);
+
+// Rate limiting: general API
+const apiLimiter = rateLimit({
+  windowMs: 1 * 60 * 1000, // 1 minute
+  max: 30,                  // 30 requests per minute
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests. Please wait a moment.' }
+});
+
+// Rate limiting: downloads (stricter)
+const downloadLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000, // 5 minutes
+  max: 15,                  // 15 downloads per 5 min
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Download limit reached. Please wait a few minutes.' }
+});
+
+app.use(express.json({ limit: '1mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Resolve yt-dlp: prefer local bin (Heroku), fall back to global (local dev)
@@ -19,7 +58,10 @@ const LOCAL_YTDLP = path.join(__dirname, 'bin', 'yt-dlp');
 const YTDLP = fs.existsSync(LOCAL_YTDLP) ? LOCAL_YTDLP : 'yt-dlp';
 
 const activeDownloads = new Map();
-const jobs = new Map(); // jobId -> { status, progress, tracks, batchDir, zipPath, error }
+const jobs = new Map();
+
+const MAX_PLAYLIST_TRACKS = 50;
+const MAX_CONCURRENT_JOBS = 5;
 
 // Clean up old jobs every 10 minutes
 setInterval(() => {
@@ -33,10 +75,29 @@ setInterval(() => {
   }
 }, 10 * 60 * 1000);
 
+// --- URL validation ---
+
+function isValidSoundCloudUrl(urlStr) {
+  try {
+    const parsed = new URL(urlStr);
+    // Must be HTTPS (or HTTP) with a soundcloud.com hostname
+    if (!['http:', 'https:'].includes(parsed.protocol)) return false;
+    const host = parsed.hostname.toLowerCase();
+    if (host !== 'soundcloud.com' && !host.endsWith('.soundcloud.com')) return false;
+    // Must have a path beyond just /
+    if (parsed.pathname.length <= 1) return false;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// --- Routes ---
+
 // Get track/playlist info
-app.post('/api/info', (req, res) => {
+app.post('/api/info', apiLimiter, (req, res) => {
   const { url } = req.body;
-  if (!url || !url.includes('soundcloud.com')) {
+  if (!url || !isValidSoundCloudUrl(url)) {
     return res.status(400).json({ error: 'Invalid SoundCloud URL' });
   }
 
@@ -69,29 +130,32 @@ app.post('/api/info', (req, res) => {
       }
 
       const playlistTitle = entries[0].playlist_title || entries[0].playlist || 'Playlist';
-      return res.json({
-        type: 'playlist',
-        title: playlistTitle,
-        tracks: entries.map(t => ({
-          title: t.fulltitle || t.title || t.track || 'Unknown',
-          artist: t.artist || t.uploader || t.creator || t.channel || 'Unknown',
-          album: t.album || '',
-          artwork: getBestThumbnail(t),
-          duration: t.duration || 0,
-          url: t.webpage_url || t.url || ''
-        }))
-      });
+      const tracks = entries.slice(0, MAX_PLAYLIST_TRACKS).map(t => ({
+        title: t.fulltitle || t.title || t.track || 'Unknown',
+        artist: t.artist || t.uploader || t.creator || t.channel || 'Unknown',
+        album: t.album || '',
+        artwork: getBestThumbnail(t),
+        duration: t.duration || 0,
+        url: t.webpage_url || t.url || ''
+      }));
+
+      const response = { type: 'playlist', title: playlistTitle, tracks };
+      if (entries.length > MAX_PLAYLIST_TRACKS) {
+        response.truncated = true;
+        response.totalAvailable = entries.length;
+      }
+      return res.json(response);
     } catch (parseErr) {
       return res.status(500).json({ error: 'Failed to parse track info' });
     }
   });
 });
 
-// Download single track (responds within 30s for most tracks)
-app.post('/api/download', (req, res) => {
+// Download single track
+app.post('/api/download', downloadLimiter, (req, res) => {
   const { url, format = 'mp3', sessionId } = req.body;
 
-  if (!url || !url.includes('soundcloud.com')) {
+  if (!url || !isValidSoundCloudUrl(url)) {
     return res.status(400).json({ error: 'Invalid SoundCloud URL' });
   }
 
@@ -183,17 +247,34 @@ app.post('/api/download', (req, res) => {
   });
 });
 
-// Start a playlist download job (returns immediately with jobId)
-app.post('/api/start-playlist', (req, res) => {
+// Start a playlist download job
+app.post('/api/start-playlist', downloadLimiter, (req, res) => {
   const { tracks, format = 'mp3', playlistName } = req.body;
 
   if (!tracks || !Array.isArray(tracks) || tracks.length === 0) {
     return res.status(400).json({ error: 'No tracks provided' });
   }
 
+  if (tracks.length > MAX_PLAYLIST_TRACKS) {
+    return res.status(400).json({ error: `Maximum ${MAX_PLAYLIST_TRACKS} tracks per playlist` });
+  }
+
+  // Validate every track URL
+  for (const track of tracks) {
+    if (!track.url || !isValidSoundCloudUrl(track.url)) {
+      return res.status(400).json({ error: 'Invalid track URL in playlist' });
+    }
+  }
+
   const allowedFormats = ['mp3', 'wav', 'aac', 'flac'];
   if (!allowedFormats.includes(format)) {
     return res.status(400).json({ error: 'Invalid format' });
+  }
+
+  // Limit concurrent jobs
+  const activeJobs = [...jobs.values()].filter(j => j.status === 'downloading' || j.status === 'zipping');
+  if (activeJobs.length >= MAX_CONCURRENT_JOBS) {
+    return res.status(429).json({ error: 'Server is busy. Please try again in a moment.' });
   }
 
   const jobId = randomUUID();
@@ -216,11 +297,7 @@ app.post('/api/start-playlist', (req, res) => {
   };
 
   jobs.set(jobId, job);
-
-  // Return jobId immediately (no 30s timeout risk)
   res.json({ jobId });
-
-  // Process tracks in the background
   processPlaylist(jobId, tracks, format);
 });
 
@@ -282,7 +359,6 @@ async function processPlaylist(jobId, tracks, format) {
             job.trackStatuses[i] = 'failed';
           }
 
-          // Clean up non-audio files (thumbnails etc)
           const leftover = fs.readdirSync(job.batchDir).filter(f => f.startsWith(fileId));
           leftover.forEach(f => { try { fs.unlinkSync(path.join(job.batchDir, f)); } catch (e) {} });
 
@@ -303,7 +379,6 @@ async function processPlaylist(jobId, tracks, format) {
     return;
   }
 
-  // Build the zip
   job.progress = 95;
   job.status = 'zipping';
 
@@ -325,8 +400,6 @@ async function processPlaylist(jobId, tracks, format) {
 
     job.status = 'complete';
     job.progress = 100;
-
-    // Clean up the batch dir (zip is ready)
     cleanupDir(job.batchDir);
     job.batchDir = null;
   } catch (err) {
@@ -339,6 +412,12 @@ async function processPlaylist(jobId, tracks, format) {
 // SSE endpoint for playlist progress
 app.get('/api/progress/:jobId', (req, res) => {
   const { jobId } = req.params;
+
+  // Validate jobId is a UUID
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(jobId)) {
+    return res.status(400).json({ error: 'Invalid job ID' });
+  }
+
   const job = jobs.get(jobId);
 
   if (!job) {
@@ -382,6 +461,11 @@ app.get('/api/progress/:jobId', (req, res) => {
 // Download the completed zip
 app.get('/api/download-zip/:jobId', (req, res) => {
   const { jobId } = req.params;
+
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(jobId)) {
+    return res.status(400).json({ error: 'Invalid job ID' });
+  }
+
   const job = jobs.get(jobId);
 
   if (!job || job.status !== 'complete' || !job.zipPath) {
@@ -400,7 +484,6 @@ app.get('/api/download-zip/:jobId', (req, res) => {
   const stream = fs.createReadStream(job.zipPath);
   stream.pipe(res);
   stream.on('end', () => {
-    // Clean up zip after download
     try { fs.unlinkSync(job.zipPath); } catch (e) {}
     jobs.delete(jobId);
   });
@@ -410,7 +493,7 @@ app.get('/api/download-zip/:jobId', (req, res) => {
 });
 
 // Cancel a job
-app.post('/api/cancel', (req, res) => {
+app.post('/api/cancel', apiLimiter, (req, res) => {
   const { sessionId, jobId } = req.body;
 
   if (sessionId && activeDownloads.has(sessionId)) {
