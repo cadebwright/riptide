@@ -519,6 +519,145 @@
     .playlist-track-status.failed { color: #ff3b30; }
     .playlist-track-status.cancelled { color: #ffcc00; }
 
+    /* Preview player */
+    .preview-toggle {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-top: 16px;
+      padding: 12px 16px;
+      background: #111;
+      border-radius: 10px;
+      border: 1px solid #2a2a2a;
+    }
+
+    .preview-toggle-label {
+      font-size: 13px;
+      color: #89898B;
+      flex: 1;
+    }
+
+    .preview-toggle-label strong {
+      color: #fff;
+    }
+
+    .toggle-switch {
+      position: relative;
+      width: 44px;
+      height: 24px;
+      flex-shrink: 0;
+    }
+
+    .toggle-switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+
+    .toggle-slider {
+      position: absolute;
+      cursor: pointer;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: #2a2a2a;
+      border-radius: 12px;
+      transition: 0.2s;
+    }
+
+    .toggle-slider::before {
+      content: '';
+      position: absolute;
+      height: 18px;
+      width: 18px;
+      left: 3px;
+      bottom: 3px;
+      background: #666;
+      border-radius: 50%;
+      transition: 0.2s;
+    }
+
+    .toggle-switch input:checked + .toggle-slider {
+      background: rgba(255, 103, 0, 0.3);
+    }
+
+    .toggle-switch input:checked + .toggle-slider::before {
+      transform: translateX(20px);
+      background: #FF6700;
+    }
+
+    .preview-player {
+      display: none;
+      margin-top: 12px;
+      padding: 14px 16px;
+      background: #111;
+      border-radius: 10px;
+      border: 1px solid #FF6700;
+    }
+
+    .preview-player.active { display: block; }
+
+    .preview-player-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+
+    .preview-now-playing {
+      font-size: 11px;
+      color: #FF6700;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .preview-track-name {
+      font-size: 12px;
+      color: #fff;
+      flex: 1;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .preview-btn {
+      background: none;
+      border: none;
+      color: #FF6700;
+      cursor: pointer;
+      font-size: 18px;
+      padding: 2px 6px;
+      transition: opacity 0.2s;
+    }
+
+    .preview-btn:hover { opacity: 0.7; }
+
+    .preview-visualizer {
+      display: flex;
+      align-items: flex-end;
+      gap: 2px;
+      height: 32px;
+      margin-top: 8px;
+    }
+
+    .viz-bar {
+      flex: 1;
+      background: linear-gradient(to top, #FF6700, #ff8c3a);
+      border-radius: 2px 2px 0 0;
+      min-height: 3px;
+      transition: height 0.1s ease;
+      opacity: 0.6;
+    }
+
+    .viz-bar.active { opacity: 1; }
+
+    .preview-time {
+      display: flex;
+      justify-content: space-between;
+      margin-top: 6px;
+      font-size: 10px;
+      color: #555;
+    }
+
     .spinner {
       display: inline-block;
       width: 16px;
@@ -601,6 +740,27 @@
           <div class="playlist-count" id="playlistCount"></div>
         </div>
         <div class="playlist-items" id="playlistItems"></div>
+
+        <div class="preview-toggle" id="previewToggle">
+          <div class="preview-toggle-label"><strong>Preview</strong> — listen to clips while downloading</div>
+          <label class="toggle-switch">
+            <input type="checkbox" id="previewEnabled">
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+
+        <div class="preview-player" id="previewPlayer">
+          <div class="preview-player-header">
+            <span class="preview-now-playing">Now Previewing</span>
+            <span class="preview-track-name" id="previewTrackName">—</span>
+            <button class="preview-btn" id="previewSkipBtn" title="Skip">&#9197;</button>
+          </div>
+          <div class="preview-visualizer" id="previewVisualizer"></div>
+          <div class="preview-time">
+            <span id="previewTimeElapsed">0:00</span>
+            <span id="previewTimeTotal">0:15</span>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -689,6 +849,7 @@
 
       if (currentAbortController) currentAbortController.abort();
       if (currentEventSource) { currentEventSource.close(); currentEventSource = null; }
+      stopPreview();
 
       currentJobId = null;
       setDownloadingState(false);
@@ -786,7 +947,11 @@
 
       currentJobId = jobId;
 
+      // Set up preview track names
+      previewTrackNames = info.tracks.map(t => t.artist + ' - ' + t.title);
+
       // Listen for progress via SSE
+      const previewSeen = new Set();
       await new Promise((resolve, reject) => {
         const es = new EventSource(`/api/progress/${jobId}`);
         currentEventSource = es;
@@ -798,6 +963,16 @@
           if (data.trackStatuses) {
             data.trackStatuses.forEach((status, i) => {
               updatePlaylistTrackStatus(i, status);
+            });
+          }
+
+          // Trigger previews for newly ready tracks
+          if (data.previewReady) {
+            data.previewReady.forEach((ready, i) => {
+              if (ready && !previewSeen.has(i)) {
+                previewSeen.add(i);
+                onPreviewReady(jobId, i, previewTrackNames[i]);
+              }
             });
           }
 
@@ -843,6 +1018,7 @@
       const filename = sanitizeFilename(info.title) + '.zip';
       triggerBrowserDownload(blob, filename);
 
+      stopPreview();
       info.tracks.forEach((_, i) => updatePlaylistTrackStatus(i, 'done'));
       setProgress(100, 'Playlist complete!');
       info.tracks.forEach(t => addToHistory(t, format));
@@ -975,6 +1151,159 @@
       const div = document.createElement('div');
       div.textContent = str || '';
       return div.innerHTML;
+    }
+
+    // --- Preview player ---
+    let previewAudio = null;
+    let previewAnalyser = null;
+    let previewAudioCtx = null;
+    let previewAnimFrame = null;
+    let previewQueue = [];
+    let previewPlaying = false;
+    let previewCurrentIndex = -1;
+    let previewJobId = null;
+    let previewTrackNames = [];
+
+    const previewEnabledCheck = document.getElementById('previewEnabled');
+    previewEnabledCheck.checked = localStorage.getItem('previewEnabled') === 'true';
+
+    previewEnabledCheck.addEventListener('change', () => {
+      localStorage.setItem('previewEnabled', previewEnabledCheck.checked);
+      if (!previewEnabledCheck.checked) stopPreview();
+    });
+
+    document.getElementById('previewSkipBtn').addEventListener('click', () => {
+      playNextPreview();
+    });
+
+    function initVisualizer() {
+      const container = document.getElementById('previewVisualizer');
+      container.innerHTML = '';
+      for (let i = 0; i < 32; i++) {
+        const bar = document.createElement('div');
+        bar.className = 'viz-bar';
+        bar.style.height = '3px';
+        container.appendChild(bar);
+      }
+    }
+
+    function onPreviewReady(jobId, trackIndex, trackName) {
+      previewJobId = jobId;
+      if (!previewTrackNames[trackIndex]) previewTrackNames[trackIndex] = trackName;
+
+      if (previewEnabledCheck.checked) {
+        if (!previewQueue.includes(trackIndex)) {
+          previewQueue.push(trackIndex);
+        }
+        if (!previewPlaying) {
+          playNextPreview();
+        }
+      }
+    }
+
+    function playNextPreview() {
+      if (previewAudio) {
+        previewAudio.pause();
+        previewAudio.src = '';
+        previewPlaying = false;
+      }
+      if (previewAnimFrame) {
+        cancelAnimationFrame(previewAnimFrame);
+        previewAnimFrame = null;
+      }
+
+      if (previewQueue.length === 0 || !previewEnabledCheck.checked) {
+        stopPreview();
+        return;
+      }
+
+      const idx = previewQueue.shift();
+      previewCurrentIndex = idx;
+
+      const player = document.getElementById('previewPlayer');
+      player.classList.add('active');
+      document.getElementById('previewTrackName').textContent =
+        previewTrackNames[idx] || `Track ${idx + 1}`;
+
+      initVisualizer();
+
+      previewAudio = new Audio(`/api/preview/${previewJobId}/${idx}`);
+      previewPlaying = true;
+
+      // Set up Web Audio analyser for visualizer
+      if (!previewAudioCtx) {
+        previewAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      }
+
+      previewAudio.addEventListener('canplay', () => {
+        try {
+          const source = previewAudioCtx.createMediaElementSource(previewAudio);
+          previewAnalyser = previewAudioCtx.createAnalyser();
+          previewAnalyser.fftSize = 64;
+          source.connect(previewAnalyser);
+          previewAnalyser.connect(previewAudioCtx.destination);
+          animateVisualizer();
+        } catch (e) {
+          // Might already be connected, still play
+        }
+        previewAudio.play().catch(() => {});
+      }, { once: true });
+
+      previewAudio.addEventListener('timeupdate', () => {
+        const el = document.getElementById('previewTimeElapsed');
+        if (el && previewAudio) {
+          const s = Math.floor(previewAudio.currentTime);
+          el.textContent = `0:${String(s).padStart(2, '0')}`;
+        }
+      });
+
+      previewAudio.addEventListener('ended', () => {
+        playNextPreview();
+      });
+
+      previewAudio.addEventListener('error', () => {
+        playNextPreview();
+      });
+    }
+
+    function animateVisualizer() {
+      if (!previewAnalyser || !previewPlaying) return;
+
+      const bars = document.querySelectorAll('.viz-bar');
+      const data = new Uint8Array(previewAnalyser.frequencyBinCount);
+      previewAnalyser.getByteFrequencyData(data);
+
+      bars.forEach((bar, i) => {
+        const value = data[i] || 0;
+        const height = Math.max(3, (value / 255) * 32);
+        bar.style.height = height + 'px';
+        bar.classList.toggle('active', value > 40);
+      });
+
+      previewAnimFrame = requestAnimationFrame(animateVisualizer);
+    }
+
+    function stopPreview() {
+      if (previewAudio) {
+        previewAudio.pause();
+        previewAudio.src = '';
+        previewAudio = null;
+      }
+      if (previewAnimFrame) {
+        cancelAnimationFrame(previewAnimFrame);
+        previewAnimFrame = null;
+      }
+      previewPlaying = false;
+      previewQueue = [];
+      previewCurrentIndex = -1;
+      previewTrackNames = [];
+      document.getElementById('previewPlayer').classList.remove('active');
+
+      // Reset viz bars
+      document.querySelectorAll('.viz-bar').forEach(bar => {
+        bar.style.height = '3px';
+        bar.classList.remove('active');
+      });
     }
   </script>
 </body>

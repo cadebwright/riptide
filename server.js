@@ -24,6 +24,7 @@ app.use(helmet({
       styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
       fontSrc: ["'self'", "https://fonts.gstatic.com"],
       imgSrc: ["'self'", "https://i1.sndcdn.com", "https://*.sndcdn.com", "data:"],
+      mediaSrc: ["'self'", "blob:"],
       connectSrc: ["'self'"],
     }
   }
@@ -281,13 +282,18 @@ app.post('/api/start-playlist', downloadLimiter, (req, res) => {
   const batchDir = path.join(DOWNLOADS_DIR, jobId);
   fs.mkdirSync(batchDir);
 
+  const previewDir = path.join(batchDir, '_previews');
+  fs.mkdirSync(previewDir);
+
   const job = {
     status: 'downloading',
     progress: 0,
     currentTrack: 0,
     totalTracks: tracks.length,
     trackStatuses: tracks.map(() => 'pending'),
+    previewReady: tracks.map(() => false),
     batchDir,
+    previewDir,
     zipPath: null,
     error: null,
     cancelled: false,
@@ -353,8 +359,14 @@ async function processPlaylist(jobId, tracks, format) {
           if (audioFile) {
             const ext = path.extname(audioFile).slice(1);
             const newName = `${trackNum} - ${trackSafeName}.${ext}`;
-            fs.renameSync(path.join(job.batchDir, audioFile), path.join(job.batchDir, newName));
+            const fullTrackPath = path.join(job.batchDir, newName);
+            fs.renameSync(path.join(job.batchDir, audioFile), fullTrackPath);
             job.trackStatuses[i] = 'done';
+
+            // Generate preview clip (15s from ~35% into the track)
+            generatePreview(fullTrackPath, job.previewDir, i, track.duration || 0)
+              .then(() => { job.previewReady[i] = true; })
+              .catch(() => {}); // non-fatal
           } else {
             job.trackStatuses[i] = 'failed';
           }
@@ -444,6 +456,7 @@ app.get('/api/progress/:jobId', (req, res) => {
       currentTrack: job.currentTrack,
       totalTracks: job.totalTracks,
       trackStatuses: job.trackStatuses,
+      previewReady: job.previewReady,
       error: job.error,
     })}\n\n`);
 
@@ -490,6 +503,59 @@ app.get('/api/download-zip/:jobId', (req, res) => {
   stream.on('error', () => {
     if (!res.headersSent) res.status(500).json({ error: 'File read error' });
   });
+});
+
+// Generate a 15-second preview clip from ~35% into the track
+function generatePreview(trackPath, previewDir, trackIndex, duration) {
+  return new Promise((resolve, reject) => {
+    // Start at ~35% of the track, or 30s in, whichever is less
+    const startSec = duration > 0
+      ? Math.max(0, Math.floor(duration * 0.35))
+      : 30;
+    const previewPath = path.join(previewDir, `${trackIndex}.mp3`);
+
+    execFile('ffmpeg', [
+      '-y',
+      '-ss', String(startSec),
+      '-i', trackPath,
+      '-t', '15',
+      '-af', 'afade=t=in:st=0:d=1,afade=t=out:st=13:d=2',
+      '-b:a', '128k',
+      '-f', 'mp3',
+      previewPath
+    ], { timeout: 15000 }, (err) => {
+      if (err) return reject(err);
+      resolve(previewPath);
+    });
+  });
+}
+
+// Serve a preview clip
+app.get('/api/preview/:jobId/:trackIndex', (req, res) => {
+  const { jobId, trackIndex } = req.params;
+
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(jobId)) {
+    return res.status(400).json({ error: 'Invalid job ID' });
+  }
+
+  const idx = parseInt(trackIndex, 10);
+  if (isNaN(idx) || idx < 0 || idx > 200) {
+    return res.status(400).json({ error: 'Invalid track index' });
+  }
+
+  const job = jobs.get(jobId);
+  if (!job || !job.previewDir) {
+    return res.status(404).json({ error: 'Job not found' });
+  }
+
+  const previewPath = path.join(job.previewDir, `${idx}.mp3`);
+  if (!fs.existsSync(previewPath)) {
+    return res.status(404).json({ error: 'Preview not ready' });
+  }
+
+  res.setHeader('Content-Type', 'audio/mpeg');
+  res.setHeader('Cache-Control', 'no-cache');
+  fs.createReadStream(previewPath).pipe(res);
 });
 
 // Cancel a job
