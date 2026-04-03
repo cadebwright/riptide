@@ -1255,6 +1255,30 @@
     let previewFadeTimer = null;
 
     const FADE_MS = 800;
+    let audioUnlocked = false;
+
+    // Safari/iOS blocks autoplay until a user gesture triggers play().
+    // We "unlock" audio on the first tap so subsequent auto-plays work.
+    function unlockAudio() {
+      if (audioUnlocked) return;
+      audioUnlocked = true;
+
+      // Create and play a silent audio element to unlock the media session
+      const silent = new Audio();
+      silent.src = 'data:audio/mp3;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU4Ljc2LjEwMAAAAAAAAAAAAAAA/+MYxAAAAAANIAAAAAExBTUUzLjEwMFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV/+MYxDsAAADSAAAAAFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV';
+      silent.volume = 0.01;
+      silent.play().then(() => { silent.pause(); silent.remove(); }).catch(() => {});
+
+      // Also unlock AudioContext
+      ensureAudioCtx();
+      if (previewAudioCtx && previewAudioCtx.state === 'suspended') {
+        previewAudioCtx.resume();
+      }
+    }
+
+    // Unlock on any user interaction that could lead to preview playback
+    document.getElementById('downloadBtn').addEventListener('click', unlockAudio, { once: false });
+    document.getElementById('previewEnabled').addEventListener('change', unlockAudio, { once: false });
 
     const previewEnabledCheck = document.getElementById('previewEnabled');
     previewEnabledCheck.checked = localStorage.getItem('previewEnabled') !== 'false';
@@ -1265,6 +1289,7 @@
     });
 
     document.getElementById('previewSkipBtn').addEventListener('click', () => {
+      unlockAudio();
       fadeOutThenNext();
     });
 
@@ -1415,7 +1440,19 @@
           vizAnalyserConnected = false;
         }
 
-        previewAudio.play().catch(() => {});
+        previewAudio.play().catch(() => {
+          // Safari autoplay blocked — show tap prompt on the player
+          const nameEl = document.getElementById('previewTrackName');
+          const origText = nameEl.textContent;
+          nameEl.textContent = '⏵ Tap here to start preview';
+          const tapHandler = () => {
+            nameEl.textContent = origText;
+            unlockAudio();
+            if (previewAudio) previewAudio.play().catch(() => {});
+            document.getElementById('previewPlayer').removeEventListener('click', tapHandler);
+          };
+          document.getElementById('previewPlayer').addEventListener('click', tapHandler);
+        });
         animateVisualizer();
 
         // Schedule fade out before clip ends, then advance
