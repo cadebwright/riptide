@@ -295,110 +295,6 @@
       flex-shrink: 0;
     }
 
-    .history-section {
-      width: 100%;
-      margin-top: 40px;
-    }
-
-    .history-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 16px;
-    }
-
-    .history-header h2 {
-      font-size: 18px;
-      font-weight: 600;
-    }
-
-    .clear-btn {
-      background: none;
-      border: 1px solid #2a2a2a;
-      color: #89898B;
-      padding: 6px 14px;
-      border-radius: 8px;
-      font-family: 'Montserrat', sans-serif;
-      font-size: 12px;
-      cursor: pointer;
-      transition: all 0.2s;
-    }
-
-    .clear-btn:hover {
-      border-color: #FF6700;
-      color: #FF6700;
-    }
-
-    .history-list {
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-    }
-
-    .history-item {
-      display: flex;
-      align-items: center;
-      gap: 14px;
-      padding: 12px 16px;
-      background: #1a1a1a;
-      border-radius: 10px;
-      border: 1px solid #2a2a2a;
-      transition: border-color 0.2s;
-    }
-
-    .history-item:hover { border-color: #333; }
-
-    .history-artwork {
-      width: 44px;
-      height: 44px;
-      border-radius: 6px;
-      object-fit: cover;
-      background: #2a2a2a;
-      flex-shrink: 0;
-    }
-
-    .history-details { flex: 1; min-width: 0; }
-
-    .history-title {
-      font-size: 13px;
-      font-weight: 600;
-      margin-bottom: 2px;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-
-    .history-meta {
-      font-size: 11px;
-      color: #89898B;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-
-    .history-actions {
-      display: flex;
-      gap: 8px;
-      align-items: center;
-      flex-shrink: 0;
-    }
-
-    .history-format {
-      font-size: 10px;
-      color: #FF6700;
-      background: rgba(255, 103, 0, 0.1);
-      padding: 3px 8px;
-      border-radius: 4px;
-      font-weight: 600;
-      text-transform: uppercase;
-    }
-
-    .empty-history {
-      text-align: center;
-      padding: 32px;
-      color: #555;
-      font-size: 14px;
-    }
 
     .message {
       margin-top: 16px;
@@ -713,13 +609,6 @@
       .preview-track-name { font-size: 11px; }
       .preview-visualizer { height: 28px; }
 
-      .history-section { margin-top: 28px; }
-      .history-header h2 { font-size: 16px; }
-      .history-item { padding: 10px 12px; gap: 10px; }
-      .history-artwork { width: 36px; height: 36px; }
-      .history-title { font-size: 12px; }
-      .history-meta { font-size: 10px; }
-
       .progress-info { font-size: 12px; }
       .message { font-size: 12px; padding: 10px 12px; }
     }
@@ -814,19 +703,9 @@
       </div>
     </div>
 
-    <div class="history-section" id="historySection">
-      <div class="history-header">
-        <h2>Recent Downloads</h2>
-        <button class="clear-btn" id="clearBtn">Clear All</button>
-      </div>
-      <div class="history-list" id="historyList">
-        <div class="empty-history">No downloads yet</div>
-      </div>
-    </div>
   </main>
 
   <script>
-    let downloadHistory = JSON.parse(localStorage.getItem('downloadHistory') || '[]');
     let totalDownloads = parseInt(localStorage.getItem('totalDownloads') || '0');
     let isDownloading = false;
     let currentSessionId = null;
@@ -835,14 +714,57 @@
     let currentEventSource = null;
 
     document.getElementById('totalDownloads').textContent = totalDownloads;
-    renderHistory();
 
     document.getElementById('urlInput').addEventListener('keydown', (e) => {
       if (e.key === 'Enter') startDownload();
     });
     document.getElementById('downloadBtn').addEventListener('click', startDownload);
     document.getElementById('cancelBtn').addEventListener('click', cancelDownload);
-    document.getElementById('clearBtn').addEventListener('click', clearHistory);
+
+    // Auto-fetch info on paste
+    let previewAbort = null;
+    let lastPreviewedUrl = '';
+
+    document.getElementById('urlInput').addEventListener('paste', (e) => {
+      setTimeout(() => {
+        const url = document.getElementById('urlInput').value.trim();
+        if (url.includes('soundcloud.com') && url !== lastPreviewedUrl && !isDownloading) {
+          fetchPreview(url);
+        }
+      }, 50);
+    });
+
+    async function fetchPreview(url) {
+      if (previewAbort) previewAbort.abort();
+      previewAbort = new AbortController();
+      lastPreviewedUrl = url;
+
+      document.getElementById('trackInfo').classList.remove('active');
+      document.getElementById('playlistSection').classList.remove('active');
+      document.getElementById('message').className = 'message';
+
+      try {
+        const res = await fetch('/api/info', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url }),
+          signal: previewAbort.signal
+        });
+        const info = await res.json();
+        if (!res.ok) return;
+
+        const format = document.getElementById('formatSelect').value;
+        if (info.type === 'track') {
+          showTrackInfo(info, format);
+        } else if (info.type === 'playlist') {
+          showPlaylistInfo(info, format);
+        }
+        // Store info for download
+        window._previewedInfo = info;
+      } catch (e) {
+        // Ignore abort errors
+      }
+    }
 
     function showMessage(text, type) {
       const msg = document.getElementById('message');
@@ -919,21 +841,25 @@
       if (!url.includes('soundcloud.com')) { showMessage('Please enter a valid SoundCloud URL', 'error'); return; }
 
       setDownloadingState(true);
-      document.getElementById('trackInfo').classList.remove('active');
-      document.getElementById('playlistSection').classList.remove('active');
       document.getElementById('message').className = 'message';
 
       try {
-        setProgress(5, 'Fetching track info...');
-        const infoRes = await fetch('/api/info', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ url }),
-          signal: currentAbortController.signal
-        });
-
-        const info = await infoRes.json();
-        if (!infoRes.ok) throw new Error(info.error || 'Failed to fetch track info');
+        // Reuse previewed info if it matches the current URL
+        let info;
+        if (window._previewedInfo && lastPreviewedUrl === url) {
+          info = window._previewedInfo;
+          setProgress(10, 'Starting download...');
+        } else {
+          setProgress(5, 'Fetching track info...');
+          const infoRes = await fetch('/api/info', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url }),
+            signal: currentAbortController.signal
+          });
+          info = await infoRes.json();
+          if (!infoRes.ok) throw new Error(info.error || 'Failed to fetch track info');
+        }
 
         if (info.type === 'track') {
           await downloadSingleTrack(info, url, format);
@@ -974,7 +900,7 @@
       triggerBrowserDownload(blob, filename);
 
       setProgress(100, 'Complete!');
-      addToHistory(info, format);
+      addToHistory();
       showMessage('Download complete!', 'success');
     }
 
@@ -1106,7 +1032,7 @@
       stopPreview();
       info.tracks.forEach((_, i) => updatePlaylistTrackStatus(i, 'done'));
       setProgress(100, 'Playlist complete!');
-      info.tracks.forEach(t => addToHistory(t, format));
+      info.tracks.forEach(() => addToHistory());
       showMessage(`Playlist downloaded! ${info.tracks.length} tracks zipped.`, 'success');
       currentJobId = null;
     }
@@ -1174,62 +1100,10 @@
       return (name || 'download').replace(/[<>:"/\\|?*]/g, '').replace(/\s+/g, ' ').trim().substring(0, 120);
     }
 
-    function addToHistory(info, format) {
+    function addToHistory() {
       totalDownloads++;
       localStorage.setItem('totalDownloads', totalDownloads);
       document.getElementById('totalDownloads').textContent = totalDownloads;
-
-      downloadHistory.unshift({
-        title: info.title || 'Unknown',
-        artist: info.artist || 'Unknown',
-        artwork: info.artwork || '',
-        format: format,
-        date: new Date().toISOString()
-      });
-
-      if (downloadHistory.length > 50) downloadHistory.pop();
-      localStorage.setItem('downloadHistory', JSON.stringify(downloadHistory));
-      renderHistory();
-    }
-
-    function renderHistory() {
-      const list = document.getElementById('historyList');
-      if (downloadHistory.length === 0) {
-        list.innerHTML = '<div class="empty-history">No downloads yet</div>';
-        return;
-      }
-
-      list.innerHTML = downloadHistory.map((item) => `
-        <div class="history-item">
-          ${item.artwork
-            ? `<img class="history-artwork" src="${escapeHtml(item.artwork)}" alt="">`
-            : `<div class="history-artwork"></div>`
-          }
-          <div class="history-details">
-            <div class="history-title">${escapeHtml(item.title)}</div>
-            <div class="history-meta">${escapeHtml(item.artist)} &middot; ${timeAgo(item.date)}</div>
-          </div>
-          <div class="history-actions">
-            <span class="history-format">${item.format}</span>
-          </div>
-        </div>
-      `).join('');
-    }
-
-    function clearHistory() {
-      downloadHistory = [];
-      localStorage.setItem('downloadHistory', '[]');
-      renderHistory();
-    }
-
-    function timeAgo(dateStr) {
-      const diff = Date.now() - new Date(dateStr).getTime();
-      const mins = Math.floor(diff / 60000);
-      if (mins < 1) return 'Just now';
-      if (mins < 60) return mins + 'm ago';
-      const hrs = Math.floor(mins / 60);
-      if (hrs < 24) return hrs + 'h ago';
-      return Math.floor(hrs / 24) + 'd ago';
     }
 
     function escapeHtml(str) {

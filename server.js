@@ -71,6 +71,7 @@ setInterval(() => {
   for (const [id, job] of jobs) {
     if (now - job.createdAt > 10 * 60 * 1000) {
       if (job.batchDir) cleanupDir(job.batchDir);
+      if (job.previewDir) cleanupDir(job.previewDir);
       if (job.zipPath) try { fs.unlinkSync(job.zipPath); } catch (e) {}
       jobs.delete(id);
     }
@@ -327,7 +328,7 @@ app.post('/api/start-playlist', downloadLimiter, (req, res) => {
   const batchDir = path.join(DOWNLOADS_DIR, jobId);
   fs.mkdirSync(batchDir);
 
-  const previewDir = path.join(batchDir, '_previews');
+  const previewDir = path.join(DOWNLOADS_DIR, jobId + '_previews');
   fs.mkdirSync(previewDir);
 
   const job = {
@@ -475,6 +476,7 @@ async function processPlaylist(jobId, tracks, format) {
   if (job.cancelled) {
     job.status = 'cancelled';
     cleanupDir(job.batchDir);
+    if (job.previewDir) cleanupDir(job.previewDir);
     return;
   }
 
@@ -594,6 +596,7 @@ app.get('/api/download-zip/:jobId', (req, res) => {
   stream.pipe(res);
   stream.on('end', () => {
     try { fs.unlinkSync(job.zipPath); } catch (e) {}
+    if (job.previewDir) cleanupDir(job.previewDir);
     jobs.delete(jobId);
   });
   stream.on('error', () => {
