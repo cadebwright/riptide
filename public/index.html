@@ -688,6 +688,77 @@
       color: #555;
     }
 
+    /* Fixed bottom player */
+    .fixed-player {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: #111;
+      border-top: 1px solid #2a2a2a;
+      z-index: 100;
+      transform: translateY(100%);
+      transition: transform 0.3s ease;
+    }
+
+    .fixed-player.visible {
+      transform: translateY(0);
+    }
+
+    .fixed-player-inner {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 20px;
+      max-width: 720px;
+      margin: 0 auto;
+    }
+
+    .fixed-player-badge {
+      font-size: 9px;
+      color: #FF6700;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      flex-shrink: 0;
+    }
+
+    .fixed-player-name {
+      font-size: 12px;
+      color: #fff;
+      flex: 1;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      min-width: 0;
+    }
+
+    .fixed-player-time {
+      font-size: 11px;
+      color: #89898B;
+      flex-shrink: 0;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .fixed-player-skip {
+      background: none;
+      border: none;
+      color: #FF6700;
+      cursor: pointer;
+      font-size: 16px;
+      padding: 4px 6px;
+      flex-shrink: 0;
+      transition: opacity 0.2s;
+    }
+
+    .fixed-player-skip:hover { opacity: 0.7; }
+
+    .fixed-player-progress {
+      height: 3px;
+      background: #FF6700;
+      width: 0%;
+      transition: width 0.3s linear;
+    }
+
     .spinner {
       display: inline-block;
       width: 16px;
@@ -745,6 +816,10 @@
       .preview-now-playing { font-size: 9px; }
       .preview-track-name { font-size: 11px; }
       .preview-visualizer { height: 28px; }
+
+      .fixed-player-inner { padding: 8px 14px; gap: 8px; }
+      .fixed-player-badge { font-size: 8px; }
+      .fixed-player-name { font-size: 11px; }
 
       .progress-info { font-size: 12px; }
       .message { font-size: 12px; padding: 10px 12px; }
@@ -849,6 +924,16 @@
     </div>
 
   </main>
+
+  <div class="fixed-player" id="fixedPlayer">
+    <div class="fixed-player-inner">
+      <span class="fixed-player-badge">NOW PLAYING</span>
+      <span class="fixed-player-name" id="fixedPlayerName">—</span>
+      <span class="fixed-player-time" id="fixedPlayerTime">0:00</span>
+      <button class="fixed-player-skip" id="fixedPlayerSkip" title="Skip">&#9197;</button>
+    </div>
+    <div class="fixed-player-progress" id="fixedPlayerProgress"></div>
+  </div>
 
   <script>
     let totalDownloads = parseInt(localStorage.getItem('totalDownloads') || '0');
@@ -1400,7 +1485,60 @@
       previewNextIndex = 0;
       previewTrackNames = [];
       document.getElementById('previewPlayer').classList.remove('active');
+      document.getElementById('fixedPlayer').classList.remove('visible');
     }
+
+    // --- Fixed bottom player ---
+    const fixedPlayer = document.getElementById('fixedPlayer');
+    let mainPlayerVisible = true;
+
+    // Watch if the main preview player is in view
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        mainPlayerVisible = entry.isIntersecting;
+        if (previewPlaying) {
+          fixedPlayer.classList.toggle('visible', !mainPlayerVisible);
+        }
+      });
+    }, { threshold: 0.3 });
+
+    observer.observe(document.getElementById('previewPlayer'));
+
+    // Sync fixed player content with wavesurfer
+    function updateFixedPlayer(name, time, progress) {
+      document.getElementById('fixedPlayerName').textContent = name;
+      document.getElementById('fixedPlayerTime').textContent = time;
+      document.getElementById('fixedPlayerProgress').style.width = (progress * 100) + '%';
+    }
+
+    // Hook into wavesurfer timeupdate — patch playPreview to sync
+    const origPlayPreview = playPreview;
+    playPreview = function(idx) {
+      origPlayPreview(idx);
+
+      // After wavesurfer is created, add sync listener
+      if (wavesurferInstance) {
+        wavesurferInstance.on('timeupdate', (time) => {
+          const dur = wavesurferInstance.getDuration() || 1;
+          const name = previewTrackNames[idx] || `Track ${idx + 1}`;
+          updateFixedPlayer(name, formatSec(time), time / dur);
+
+          // Show/hide based on scroll position
+          if (previewPlaying && !mainPlayerVisible) {
+            fixedPlayer.classList.add('visible');
+          }
+        });
+
+        wavesurferInstance.on('finish', () => {
+          fixedPlayer.classList.remove('visible');
+        });
+      }
+    };
+
+    // Fixed player skip button
+    document.getElementById('fixedPlayerSkip').addEventListener('click', () => {
+      advanceToNext();
+    });
   </script>
 </body>
 </html>
