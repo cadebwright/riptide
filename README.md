@@ -56,15 +56,6 @@ npm start
 
 The app runs at `http://localhost:3000`.
 
-## Deployment
-
-Configured for Heroku via `Procfile`. The `postinstall` script automatically downloads the yt-dlp binary for Linux environments.
-
-```bash
-heroku create
-git push heroku main
-```
-
 ## License
 
-ISC
+[GPL-3.0](LICENSE)
