@@ -591,6 +591,18 @@
       text-overflow: ellipsis;
     }
 
+    .playlist-track-genre {
+      display: inline-block;
+      font-size: 9px;
+      color: #FF6700;
+      background: rgba(255, 103, 0, 0.1);
+      padding: 2px 6px;
+      border-radius: 3px;
+      margin-top: 2px;
+      font-weight: 600;
+      animation: fadeSlideIn 0.3s ease;
+    }
+
     .playlist-track-status {
       font-size: 11px;
       color: #89898B;
@@ -1263,6 +1275,17 @@
                   artEl.replaceWith(img);
                 } else if (artEl && artEl.tagName === 'IMG' && meta.artwork) {
                   artEl.src = meta.artwork;
+                }
+                // Show genre badge
+                if (meta.genre) {
+                  const trackEl = document.getElementById(`playlist-track-${i}`);
+                  if (trackEl && !trackEl.querySelector('.playlist-track-genre')) {
+                    const badge = document.createElement('span');
+                    badge.className = 'playlist-track-genre';
+                    badge.textContent = meta.genre;
+                    const infoDiv = trackEl.querySelector('.playlist-track-info');
+                    if (infoDiv) infoDiv.appendChild(badge);
+                  }
                 }
                 // Update preview name
                 if (meta.artist && meta.title) {

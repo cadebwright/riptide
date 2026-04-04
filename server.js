@@ -399,13 +399,15 @@ function downloadTrack(job, track, i, format) {
       }
 
       // Try to parse enriched metadata from yt-dlp output
+      let parsedMeta = null;
       try {
-        const meta = JSON.parse(jsonOut.trim().split('\n').pop());
+        parsedMeta = JSON.parse(jsonOut.trim().split('\n').pop());
         job.trackMeta[i] = {
-          title: meta.fulltitle || meta.title || track.title,
-          artist: meta.artist || meta.uploader || meta.creator || track.artist,
-          artwork: getBestThumbnail(meta),
-          duration: meta.duration || track.duration || 0,
+          title: parsedMeta.fulltitle || parsedMeta.title || track.title,
+          artist: parsedMeta.artist || parsedMeta.uploader || parsedMeta.creator || track.artist,
+          artwork: getBestThumbnail(parsedMeta),
+          duration: parsedMeta.duration || track.duration || 0,
+          genre: pickBestGenre(parsedMeta),
         };
       } catch (e) {}
 
@@ -421,6 +423,13 @@ function downloadTrack(job, track, i, format) {
         const newName = `${safeFinal}.${ext}`;
         const fullTrackPath = path.join(job.batchDir, newName);
         fs.renameSync(path.join(job.batchDir, audioFile), fullTrackPath);
+
+        // Write accurate genre tag via ffmpeg (overwrites the broad SoundCloud category)
+        const genre = meta && meta.genre;
+        if (genre) {
+          writeGenreTag(fullTrackPath, genre).catch(() => {});
+        }
+
         job.trackStatuses[i] = 'done';
 
         const dur = (meta && meta.duration) || track.duration || 0;
@@ -602,6 +611,83 @@ app.get('/api/download-zip/:jobId', (req, res) => {
     if (!res.headersSent) res.status(500).json({ error: 'File read error' });
   });
 });
+
+// Known specific sub-genres (more useful for Rekordbox than SoundCloud's broad categories)
+const SPECIFIC_GENRES = [
+  'Tech House', 'Deep House', 'Progressive House', 'Electro House', 'Future House',
+  'Bass House', 'Melodic House', 'Afro House', 'Acid House', 'Minimal House',
+  'Techno', 'Melodic Techno', 'Hard Techno', 'Minimal Techno', 'Industrial Techno',
+  'Drum & Bass', 'Liquid DnB', 'Neurofunk', 'Jump Up',
+  'Dubstep', 'Riddim', 'Melodic Dubstep', 'Future Bass',
+  'Trap', 'Future Trap', 'Hybrid Trap',
+  'Trance', 'Psytrance', 'Progressive Trance', 'Uplifting Trance',
+  'Garage', 'UK Garage', 'Speed Garage', 'Bassline',
+  'Breakbeat', 'Breaks', 'Big Beat',
+  'Disco', 'Nu Disco', 'Disco House', 'Funk',
+  'Hardstyle', 'Hardcore', 'Hard Dance',
+  'Ambient', 'Downtempo', 'Chillout', 'Lo-Fi',
+  'House', 'EDM', 'Dance', 'Electronic',
+  'Hip Hop', 'R&B', 'Pop', 'Reggaeton', 'Latin', 'Afrobeats',
+  'Jersey Club', 'Baltimore Club', 'Amapiano',
+];
+
+// Pick the most specific genre from SoundCloud tags, falling back to the broad genre
+function pickBestGenre(meta) {
+  const tags = meta.tags || [];
+  const scGenre = meta.genre || '';
+
+  // Check tags for a specific sub-genre match (case-insensitive)
+  for (const specific of SPECIFIC_GENRES) {
+    const lower = specific.toLowerCase();
+    for (const tag of tags) {
+      if (tag.toLowerCase() === lower) return specific;
+    }
+  }
+
+  // Check if the broad genre itself is specific enough
+  for (const specific of SPECIFIC_GENRES) {
+    if (scGenre.toLowerCase() === specific.toLowerCase()) return specific;
+  }
+
+  // Fall back to the SoundCloud genre, cleaned up
+  if (scGenre && scGenre !== 'none') {
+    // Remove "& " patterns like "Dance & EDM" → take the more specific part
+    const parts = scGenre.split('&').map(s => s.trim()).filter(Boolean);
+    if (parts.length > 1) {
+      // Return the more specific part (usually the second)
+      for (const part of parts) {
+        for (const specific of SPECIFIC_GENRES) {
+          if (part.toLowerCase() === specific.toLowerCase()) return specific;
+        }
+      }
+    }
+    return scGenre;
+  }
+
+  return '';
+}
+
+// Write genre tag into audio file using ffmpeg
+function writeGenreTag(filePath, genre) {
+  return new Promise((resolve, reject) => {
+    const tmpPath = filePath + '.tmp' + path.extname(filePath);
+    execFile('ffmpeg', [
+      '-y', '-i', filePath,
+      '-metadata', `genre=${genre}`,
+      '-codec', 'copy',
+      tmpPath
+    ], { timeout: 10000 }, (err) => {
+      if (err) return reject(err);
+      try {
+        fs.renameSync(tmpPath, filePath);
+        resolve();
+      } catch (e) {
+        try { fs.unlinkSync(tmpPath); } catch (x) {}
+        reject(e);
+      }
+    });
+  });
+}
 
 // Generate a 15-second preview clip from ~35% into the track
 function generatePreview(trackPath, previewDir, trackIndex, duration) {
