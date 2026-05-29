@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex,nofollow">
+  <title>RipTide · Admin Login</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #0f0f0f; --panel: #1a1a1a; --panel2: #111; --line: #2a2a2a;
+      --text: #fff; --muted: #89898B; --accent: #FF6700; --accent2: #ff8c3a; --bad: #ff3b30;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Montserrat', sans-serif;
+      background: radial-gradient(1200px 600px at 50% -10%, #1f1a14 0%, var(--bg) 55%);
+      color: var(--text); min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px;
+    }
+    .card {
+      width: 100%; max-width: 380px; background: var(--panel); border: 1px solid var(--line);
+      border-radius: 16px; padding: 32px 28px; box-shadow: 0 20px 60px rgba(0,0,0,.5);
+    }
+    .brand { font-size: 26px; font-weight: 700; text-align: center; }
+    .brand span { color: var(--accent); }
+    .tag { text-align: center; color: var(--muted); font-size: 13px; margin-top: 4px; margin-bottom: 24px; }
+    label { display: block; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 7px; }
+    input[type=password] {
+      width: 100%; background: var(--panel2); border: 1px solid var(--line); border-radius: 10px;
+      color: var(--text); padding: 12px 14px; font-size: 15px; outline: none; font-family: 'Montserrat', sans-serif;
+    }
+    input[type=password]:focus { border-color: var(--accent); }
+    #turnstile-container { display: none; justify-content: center; margin-top: 18px; }
+    button {
+      width: 100%; margin-top: 20px; background: linear-gradient(135deg, var(--accent), var(--accent2));
+      background-size: 200% 200%; color: #fff; border: none; border-radius: 10px; padding: 13px;
+      font-size: 15px; font-weight: 700; cursor: pointer; font-family: 'Montserrat', sans-serif;
+      box-shadow: 0 6px 20px rgba(255, 103, 0, 0.25);
+    }
+    button:hover:not(:disabled) { box-shadow: 0 8px 26px rgba(255, 103, 0, 0.35); }
+    button:disabled { opacity: .55; cursor: not-allowed; box-shadow: none; }
+    .msg { margin-top: 14px; font-size: 13px; min-height: 18px; text-align: center; color: var(--bad); }
+    a.back { display: block; text-align: center; margin-top: 18px; color: var(--muted); font-size: 13px; text-decoration: none; }
+    a.back:hover { color: var(--accent); }
+  </style>
+</head>
+<body>
+  <form class="card" id="loginForm" autocomplete="off">
+    <div class="brand">Rip<span>Tide</span></div>
+    <div class="tag">Analytics — admin access</div>
+
+    <label for="password">Password</label>
+    <input type="password" id="password" placeholder="Enter admin password" autofocus required>
+
+    <div id="turnstile-container"></div>
+
+    <button type="submit" id="submitBtn">Sign in</button>
+    <div class="msg" id="msg"></div>
+    <a class="back" href="/">← Back to RipTide</a>
+  </form>
+
+  <script>
+    let turnstileEnabled = false;
+    let turnstileToken = null;
+    let turnstileWidgetId = null;
+
+    window.onTurnstileLoad = function () {
+      const c = document.getElementById('turnstile-container');
+      if (!c || !turnstileEnabled || !window.turnstile) return;
+      turnstileWidgetId = window.turnstile.render('#turnstile-container', {
+        sitekey: c.dataset.sitekey,
+        theme: 'dark',
+        callback: (t) => { turnstileToken = t; },
+        'error-callback': () => { turnstileToken = null; },
+        'expired-callback': () => { turnstileToken = null; },
+      });
+    };
+
+    (async function init() {
+      try {
+        const cfg = await (await fetch('/api/config')).json();
+        if (cfg.turnstile && cfg.turnstile.enabled && cfg.turnstile.siteKey) {
+          turnstileEnabled = true;
+          const c = document.getElementById('turnstile-container');
+          c.dataset.sitekey = cfg.turnstile.siteKey;
+          c.style.display = 'flex';
+          const s = document.createElement('script');
+          s.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit&onload=onTurnstileLoad';
+          s.async = true; s.defer = true;
+          document.head.appendChild(s);
+        }
+      } catch (e) {}
+    })();
+
+    const form = document.getElementById('loginForm');
+    const msg = document.getElementById('msg');
+    const btn = document.getElementById('submitBtn');
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      msg.textContent = '';
+      const password = document.getElementById('password').value;
+
+      if (turnstileEnabled && !turnstileToken) {
+        msg.textContent = 'Please complete the verification first.';
+        return;
+      }
+
+      btn.disabled = true; btn.textContent = 'Signing in…';
+      try {
+        const res = await fetch('/api/admin/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify({ password, turnstileToken }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok) {
+          window.location.href = '/stats';
+          return;
+        }
+        msg.textContent = data.error || 'Login failed.';
+      } catch (err) {
+        msg.textContent = 'Network error. Please try again.';
+      } finally {
+        btn.disabled = false; btn.textContent = 'Sign in';
+        if (turnstileEnabled && turnstileWidgetId !== null && window.turnstile) {
+          try { window.turnstile.reset(turnstileWidgetId); turnstileToken = null; } catch (e) {}
+        }
+      }
+    });
+  </script>
+</body>
+</html>

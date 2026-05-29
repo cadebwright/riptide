@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex,nofollow">
+  <title>RipTide · Analytics</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #0f0f0f; --panel: #1a1a1a; --panel2: #111; --line: #2a2a2a;
+      --text: #fff; --muted: #89898B; --accent: #FF6700; --accent2: #ff8c3a;
+      --good: #34d399; --bad: #ff3b30;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Montserrat', sans-serif;
+      background: var(--bg); color: var(--text); padding: 24px; line-height: 1.45;
+    }
+    h1 { font-size: 22px; font-weight: 700; }
+    h1 span { color: var(--accent); }
+    .sub { color: var(--muted); font-size: 13px; margin-top: 2px; }
+    .top { display: flex; align-items: flex-end; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 22px; }
+    button {
+      background: var(--panel2); color: var(--text); border: 1px solid var(--line);
+      border-radius: 8px; padding: 8px 14px; font-size: 13px; cursor: pointer;
+    }
+    button:hover { border-color: var(--accent); }
+    .grid { display: grid; gap: 16px; }
+    .cards { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); margin-bottom: 16px; }
+    .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; }
+    .card .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+    .card .value { font-size: 30px; font-weight: 700; margin-top: 6px; }
+    .card .value small { font-size: 13px; color: var(--muted); font-weight: 500; }
+    .panels { grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
+    .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; }
+    .panel h2 { font-size: 14px; font-weight: 600; margin-bottom: 14px; color: var(--text); }
+    .bar-row { display: flex; align-items: center; gap: 10px; margin: 7px 0; font-size: 13px; }
+    .bar-row .name { width: 40%; min-width: 90px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .bar-row .name .a { color: var(--muted); }
+    .bar-track { flex: 1; background: var(--panel2); border-radius: 5px; height: 18px; overflow: hidden; }
+    .bar-fill { height: 100%; background: linear-gradient(90deg, var(--accent), var(--accent2)); border-radius: 5px; }
+    .bar-row .n { width: 44px; text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+    .chart { display: flex; align-items: flex-end; gap: 3px; height: 140px; padding-top: 8px; }
+    .chart .col { flex: 1; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; gap: 4px; min-width: 0; }
+    .chart .col .b { width: 100%; background: linear-gradient(180deg, var(--accent), var(--accent2)); border-radius: 3px 3px 0 0; min-height: 2px; }
+    .chart .col .t { font-size: 9px; color: var(--muted); white-space: nowrap; }
+    .full { grid-column: 1 / -1; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th { text-align: left; color: var(--muted); font-weight: 500; padding: 8px 10px; border-bottom: 1px solid var(--line); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+    td { padding: 9px 10px; border-bottom: 1px solid var(--panel2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 240px; }
+    .pill { font-size: 11px; padding: 2px 8px; border-radius: 999px; background: var(--panel2); color: var(--muted); }
+    .pill.single { background: rgba(255,103,0,.15); color: var(--accent); }
+    .pill.playlist { background: rgba(255,140,58,.18); color: var(--accent2); }
+    .pill.ok { background: rgba(52,211,153,.15); color: var(--good); }
+    .pill.fail { background: rgba(248,113,113,.15); color: var(--bad); }
+    .empty { color: var(--muted); font-size: 13px; padding: 20px 0; text-align: center; }
+    .err { color: var(--bad); padding: 20px; border: 1px solid var(--bad); border-radius: 12px; background: rgba(248,113,113,.08); }
+  </style>
+</head>
+<body>
+  <div class="top">
+    <div>
+      <h1>Rip<span>Tide</span> Analytics</h1>
+      <div class="sub" id="sub">Loading…</div>
+    </div>
+    <button onclick="load()">↻ Refresh</button>
+  </div>
+  <div id="root"></div>
+
+  <script>
+    const $ = (h) => { const d = document.createElement('div'); d.innerHTML = h; return d.firstElementChild; };
+    const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
+    const num = (n) => Number(n || 0).toLocaleString();
+
+    function barList(items, nameFn) {
+      if (!items || !items.length) return '<div class="empty">No data yet</div>';
+      const max = Math.max(...items.map(i => +i.n)) || 1;
+      return items.map(i => `
+        <div class="bar-row">
+          <div class="name">${nameFn(i)}</div>
+          <div class="bar-track"><div class="bar-fill" style="width:${Math.max(2, (+i.n / max) * 100)}%"></div></div>
+          <div class="n">${num(i.n)}</div>
+        </div>`).join('');
+    }
+
+    function chart(daily) {
+      if (!daily || !daily.length) return '<div class="empty">No downloads in the last 30 days</div>';
+      const max = Math.max(...daily.map(d => +d.n)) || 1;
+      return '<div class="chart">' + daily.map(d => `
+        <div class="col" title="${d.day}: ${d.n}">
+          <div class="b" style="height:${(+d.n / max) * 120}px"></div>
+          <div class="t">${d.day.slice(5)}</div>
+        </div>`).join('') + '</div>';
+    }
+
+    function card(label, value, sub) {
+      return `<div class="card"><div class="label">${label}</div><div class="value">${value}${sub ? ` <small>${sub}</small>` : ''}</div></div>`;
+    }
+
+    async function load() {
+      const root = document.getElementById('root');
+      try {
+        const res = await fetch('/api/stats', { credentials: 'same-origin' });
+        if (res.status === 401) { window.location.href = '/stats/login'; return; }
+        if (!res.ok) throw new Error('Request failed (' + res.status + ')');
+        const s = await res.json();
+        if (!s.enabled) {
+          root.innerHTML = '<div class="err">Analytics is disabled — <b>DATABASE_URL</b> is not set on the server.</div>';
+          document.getElementById('sub').textContent = 'Disabled';
+          return;
+        }
+        const t = s.totals;
+        const okRate = (+t.ok_count + +t.fail_count) > 0
+          ? Math.round((+t.ok_count / (+t.ok_count + +t.fail_count)) * 100) + '%' : '—';
+
+        document.getElementById('sub').textContent = 'Last updated ' + new Date().toLocaleString();
+
+        root.innerHTML = `
+          <div class="grid cards">
+            ${card('Total downloads', num(t.total_downloads), 'tracks')}
+            ${card('Unique visitors', num(t.unique_visitors))}
+            ${card('Page visits', num(t.total_visits))}
+            ${card('Last 24h', num(t.downloads_24h), 'tracks')}
+            ${card('Last 7 days', num(t.downloads_7d), 'tracks')}
+            ${card('Success rate', okRate)}
+          </div>
+
+          <div class="grid panels">
+            <div class="panel full">
+              <h2>Downloads per day (30 days)</h2>
+              ${chart(s.daily)}
+            </div>
+
+            <div class="panel"><h2>Top tracks</h2>${barList(s.topTracks, i =>
+              `${esc(i.title)} ${i.artist ? `<span class="a">· ${esc(i.artist)}</span>` : ''}`)}</div>
+
+            <div class="panel"><h2>Top artists</h2>${barList(s.topArtists, i => esc(i.artist))}</div>
+
+            <div class="panel"><h2>Format</h2>${barList(s.formats, i => esc(String(i.label).toUpperCase()))}</div>
+
+            <div class="panel"><h2>Single vs playlist</h2>${barList(s.kinds, i => esc(i.label))}</div>
+
+            <div class="panel"><h2>Top countries</h2>${barList(s.countries, i => esc(i.label))}</div>
+
+            <div class="panel"><h2>Device</h2>${barList(s.devices, i => esc(i.label))}</div>
+
+            <div class="panel"><h2>Browser</h2>${barList(s.browsers, i => esc(i.label))}</div>
+
+            <div class="panel full">
+              <h2>Recent downloads</h2>
+              ${recentTable(s.recent)}
+            </div>
+          </div>`;
+      } catch (e) {
+        root.innerHTML = '<div class="err">Failed to load stats: ' + esc(e.message) + '</div>';
+      }
+    }
+
+    function recentTable(rows) {
+      if (!rows || !rows.length) return '<div class="empty">No downloads yet</div>';
+      return `<table>
+        <thead><tr><th>When</th><th>Type</th><th>Title / Playlist</th><th>Artist</th><th>Format</th><th>Status</th><th>Country</th><th>Device</th></tr></thead>
+        <tbody>${rows.map(r => {
+          const isPl = r.kind === 'playlist';
+          const name = isPl ? `${esc(r.playlist_name || 'Playlist')} (${r.track_count})` : esc(r.title);
+          const ok = ['success', 'complete'].includes(r.status);
+          const fail = ['failed', 'error'].includes(r.status);
+          return `<tr>
+            <td>${esc(r.at)}</td>
+            <td><span class="pill ${isPl ? 'playlist' : 'single'}">${esc(r.kind)}</span></td>
+            <td>${name}</td>
+            <td>${esc(r.artist)}</td>
+            <td>${esc(String(r.format || '').toUpperCase())}</td>
+            <td><span class="pill ${ok ? 'ok' : fail ? 'fail' : ''}">${esc(r.status || '—')}</span></td>
+            <td>${esc(r.country)}</td>
+            <td>${esc(r.device)}</td>
+          </tr>`;
+        }).join('')}</tbody>
+      </table>`;
+    }
+
+    load();
+  </script>
+</body>
+</html>

@@ -1,3 +1,4 @@
+try { require('dotenv').config(); } catch (e) {} // load .env if present (optional)
 const express = require('express');
 const { execFile, spawn } = require('child_process');
 const path = require('path');
@@ -6,10 +7,24 @@ const { randomUUID } = require('crypto');
 const archiver = require('archiver');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
+const crypto = require('crypto');
+const cookieParser = require('cookie-parser');
+const jwt = require('jsonwebtoken');
+const analytics = require('./analytics');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 const DOWNLOADS_DIR = path.join(__dirname, 'downloads');
+
+// --- Cloudflare Turnstile (bot protection) ---
+const TURNSTILE_SITE_KEY = process.env.TURNSTILE_SITE_KEY || '';
+const TURNSTILE_SECRET = process.env.TURNSTILE_SECRET_KEY || '';
+const TURNSTILE_ENABLED = !!TURNSTILE_SITE_KEY && !!TURNSTILE_SECRET;
+
+// Secret for signing admin session cookies. Derived from existing config so no
+// extra env var is required; changing ADMIN_PASSWORD invalidates old sessions.
+const SESSION_SECRET = process.env.SESSION_SECRET
+  || ((process.env.ADMIN_PASSWORD || 'riptide') + (process.env.ANALYTICS_SALT || 'salt'));
 
 if (!fs.existsSync(DOWNLOADS_DIR)) fs.mkdirSync(DOWNLOADS_DIR);
 
@@ -20,12 +35,13 @@ app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
-      scriptSrc: ["'self'", "'unsafe-inline'"],
+      scriptSrc: ["'self'", "'unsafe-inline'", "https://challenges.cloudflare.com"],
       styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
       fontSrc: ["'self'", "https://fonts.gstatic.com"],
       imgSrc: ["'self'", "https://i1.sndcdn.com", "https://*.sndcdn.com", "data:"],
       mediaSrc: ["'self'", "blob:", "data:"],
-      connectSrc: ["'self'"],
+      connectSrc: ["'self'", "https://challenges.cloudflare.com"],
+      frameSrc: ["https://challenges.cloudflare.com"],
     }
   }
 }));
@@ -51,7 +67,117 @@ const downloadLimiter = rateLimit({
   message: { error: 'Download limit reached. Please wait a few minutes.' }
 });
 
+// Rate limiting: admin login (strict — brute-force protection)
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 10,                  // 10 attempts per 15 min per IP
+  standardHeaders: true,
+  legacyHeaders: false,
+  skipSuccessfulRequests: true, // only failed attempts count toward the limit
+  message: { error: 'Too many login attempts. Please wait 15 minutes and try again.' }
+});
+
 app.use(express.json({ limit: '1mb' }));
+app.use(cookieParser());
+
+// --- Analytics: log a page visit on the root request ---
+app.get('/', (req, res, next) => {
+  try { analytics.logVisit(req); } catch (e) {}
+  next();
+});
+
+// --- Cloudflare Turnstile verification ---
+
+// Expose public client config (safe to send the site key — it's public by design).
+app.get('/api/config', (req, res) => {
+  res.json({ turnstile: { enabled: TURNSTILE_ENABLED, siteKey: TURNSTILE_SITE_KEY } });
+});
+
+async function verifyTurnstile(token, ip) {
+  if (!token) return false;
+  try {
+    const form = new URLSearchParams();
+    form.append('secret', TURNSTILE_SECRET);
+    form.append('response', token);
+    if (ip) form.append('remoteip', ip);
+    const r = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: form,
+    });
+    const data = await r.json();
+    return !!data.success;
+  } catch (e) {
+    console.error('[turnstile] verify error:', e.message);
+    return false;
+  }
+}
+
+// --- Admin dashboard auth (cookie session set by the custom login page) ---
+function requireAdmin(req, res, next) {
+  const token = req.cookies && req.cookies.rt_admin;
+  if (token) {
+    try { jwt.verify(token, SESSION_SECRET); return next(); } catch (e) {}
+  }
+  // API calls get a 401; page requests are redirected to the login page.
+  if (req.path.startsWith('/api/')) return res.status(401).json({ error: 'Not authenticated' });
+  return res.redirect('/stats/login');
+}
+
+// Custom login page (public).
+app.get('/stats/login', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'admin-login.html'));
+});
+
+// Login: verify Turnstile (if enabled) + password, then set a session cookie.
+app.post('/api/admin/login', loginLimiter, async (req, res) => {
+  const expected = process.env.ADMIN_PASSWORD;
+  if (!expected) {
+    return res.status(503).json({ error: 'Admin login is not configured. Set ADMIN_PASSWORD on the server.' });
+  }
+
+  const { password, turnstileToken } = req.body || {};
+
+  if (TURNSTILE_ENABLED) {
+    const ok = await verifyTurnstile(turnstileToken, req.ip);
+    if (!ok) return res.status(403).json({ error: 'Verification failed. Please retry the challenge.' });
+  }
+
+  const a = Buffer.from(String(password || ''));
+  const b = Buffer.from(expected);
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
+    return res.status(401).json({ error: 'Incorrect password.' });
+  }
+
+  const token = jwt.sign({ admin: true }, SESSION_SECRET, { expiresIn: '7d' });
+  res.cookie('rt_admin', token, {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: req.secure || req.headers['x-forwarded-proto'] === 'https',
+    maxAge: 7 * 24 * 60 * 60 * 1000,
+  });
+  res.json({ ok: true });
+});
+
+app.post('/api/admin/logout', (req, res) => {
+  res.clearCookie('rt_admin');
+  res.json({ ok: true });
+});
+
+// Stats dashboard page + API (registered before express.static so they stay protected)
+app.get(['/stats', '/stats.html'], requireAdmin, (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'stats.html'));
+});
+
+app.get('/api/stats', requireAdmin, async (req, res) => {
+  try {
+    const stats = await analytics.getStats();
+    res.json(stats);
+  } catch (e) {
+    res.status(500).json({ error: 'Failed to load stats' });
+  }
+});
+
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Resolve yt-dlp: prefer local bin (Heroku), fall back to global (local dev)
@@ -200,7 +326,8 @@ app.post('/api/info', apiLimiter, (req, res) => {
 
 // Download single track
 app.post('/api/download', downloadLimiter, (req, res) => {
-  const { url, format = 'mp3', sessionId } = req.body;
+  const { url, format = 'mp3', sessionId, title, artist } = req.body;
+  const logTrack = { url, title, artist };
 
   if (!url || !isValidSoundCloudUrl(url)) {
     return res.status(400).json({ error: 'Invalid SoundCloud URL' });
@@ -251,6 +378,7 @@ app.post('/api/download', downloadLimiter, (req, res) => {
 
     if (code !== 0) {
       cleanup(fileId);
+      analytics.logDownload(req, { kind: 'single', format, status: 'failed', tracks: [logTrack] });
       if (!res.headersSent) {
         return res.status(500).json({ error: 'Download failed. Make sure yt-dlp and ffmpeg are installed.' });
       }
@@ -259,6 +387,7 @@ app.post('/api/download', downloadLimiter, (req, res) => {
 
     const files = fs.readdirSync(DOWNLOADS_DIR).filter(f => f.startsWith(fileId));
     if (files.length === 0) {
+      analytics.logDownload(req, { kind: 'single', format, status: 'failed', tracks: [logTrack] });
       if (!res.headersSent) return res.status(500).json({ error: 'Conversion failed' });
       return;
     }
@@ -275,6 +404,8 @@ app.post('/api/download', downloadLimiter, (req, res) => {
 
     res.setHeader('Content-Type', mimeTypes[ext] || 'application/octet-stream');
     res.setHeader('Content-Disposition', `attachment; filename="download.${ext}"`);
+
+    analytics.logDownload(req, { kind: 'single', format, status: 'success', tracks: [logTrack] });
 
     const stream = fs.createReadStream(outputFile);
     stream.pipe(res);
@@ -350,6 +481,15 @@ app.post('/api/start-playlist', downloadLimiter, (req, res) => {
   };
 
   jobs.set(jobId, job);
+
+  job.analyticsPromise = analytics.logDownload(req, {
+    kind: 'playlist',
+    format,
+    status: 'started',
+    playlistName: playlistName || 'playlist',
+    tracks: tracks.map(t => ({ url: t.url, title: t.title, artist: t.artist })),
+  });
+
   res.json({ jobId });
   processPlaylist(jobId, tracks, format);
 });
@@ -485,6 +625,7 @@ async function processPlaylist(jobId, tracks, format) {
     job.status = 'cancelled';
     cleanupDir(job.batchDir);
     if (job.previewDir) cleanupDir(job.previewDir);
+    if (job.analyticsPromise) job.analyticsPromise.then(id => analytics.updateStatus(id, 'cancelled'));
     return;
   }
 
@@ -519,10 +660,13 @@ async function processPlaylist(jobId, tracks, format) {
     job.progress = 100;
     cleanupDir(job.batchDir);
     job.batchDir = null;
+    const okCount = job.trackStatuses.filter(s => s === 'done').length;
+    if (job.analyticsPromise) job.analyticsPromise.then(id => analytics.updateStatus(id, 'complete', okCount));
   } catch (err) {
     job.status = 'error';
     job.error = 'Failed to create zip file';
     cleanupDir(job.batchDir);
+    if (job.analyticsPromise) job.analyticsPromise.then(id => analytics.updateStatus(id, 'error'));
   }
 }
 
@@ -789,6 +933,14 @@ function cleanupDir(dir) {
     }
   } catch (e) {}
 }
+
+// 404 handler: unknown API routes get JSON, everything else redirects home.
+app.use((req, res) => {
+  if (req.path.startsWith('/api/')) return res.status(404).json({ error: 'Not found' });
+  res.redirect('/');
+});
+
+analytics.init();
 
 app.listen(PORT, () => {
   console.log(`RipTide running at http://localhost:${PORT}`);

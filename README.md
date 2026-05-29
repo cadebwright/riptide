@@ -56,6 +56,45 @@ npm start
 
 The app runs at `http://localhost:3000`.
 
+## Analytics (optional)
+
+RipTide can log usage to a Postgres database and serve a private dashboard at `/stats`.
+It tracks page visits, downloads (single + playlist), formats, success/failure, the
+track/playlist URLs, approximate geo (country), and device/browser — using a hashed
+anonymous visitor ID (no raw IPs or personal data are stored).
+
+If `DATABASE_URL` is not set, analytics is silently disabled and the app runs normally.
+
+**Setup:**
+
+1. Create a free Postgres database at [Neon](https://neon.tech) and copy its connection string.
+2. Copy `.env.example` to `.env` (or set these vars in your host's config):
+   ```bash
+   DATABASE_URL=postgresql://user:pass@ep-xxx.neon.tech/neondb?sslmode=require
+   ADMIN_PASSWORD=choose-a-strong-password
+   ANALYTICS_SALT=any-random-string
+   ```
+3. Start the app — the schema is created automatically on first boot.
+4. Visit `/stats`. You'll be redirected to a `/stats/login` page; enter your `ADMIN_PASSWORD`.
+
+The dashboard is locked until `ADMIN_PASSWORD` is set. Login uses a cookie session
+(valid 7 days), not the browser's basic-auth popup.
+
+## Bot protection (optional)
+
+The admin login page is protected by [Cloudflare Turnstile](https://www.cloudflare.com/products/turnstile/)
+when configured. The public download page is intentionally **not** gated.
+
+Add both keys to `.env` (and add your domain — plus `localhost` for local testing —
+to the widget's allowed hostnames in the Cloudflare dashboard):
+
+```bash
+TURNSTILE_SITE_KEY=0x...
+TURNSTILE_SECRET_KEY=0x...
+```
+
+Without both keys, the login page works with the password alone.
+
 ## License
 
 [GPL-3.0](LICENSE)

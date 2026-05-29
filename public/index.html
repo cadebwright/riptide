@@ -1188,7 +1188,7 @@
       const dlRes = await fetch('/api/download', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: trackUrl, format, sessionId: currentSessionId }),
+        body: JSON.stringify({ url: trackUrl, format, sessionId: currentSessionId, title: info.title, artist: info.artist }),
         signal: currentAbortController.signal
       });
 
